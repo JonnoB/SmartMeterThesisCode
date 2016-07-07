@@ -262,45 +262,6 @@ saveCluster(test)
 ```
 
 
-Cutoffs and edges?
-```{r}
-
-datdat<-readRDS(list.files()[100]) %>%ungroup
-
-# 
-# meantest <- datdat[,-1] %>% lapply(., function(n) 
-#   (rollmean(n,3, align="right"))%>% as.data.frame)
-# 
-# meantest <- bind_cols(meantest)
-# names(meantest)<- names(datdat)[-1]
-
-
-corlist <- datdat[,2:ncol(datdat)] %>% as.matrix %>% bigcor(., nblocks= 3, verbose = TRUE, method = "spearman")
-
-
-# corlist <- meantest[,1:ncol(meantest)] %>% as.matrix %>% bigcor(., nblocks= 6, verbose = TRUE, method = "pearson")
-
-corlist %<>%as.ffdf %>% as.data.frame
-distmat <- abs(corlist)
-
-diag(distmat) <- 0
-#number of links for given significance value
-cutoff <- data.frame(cutoff = seq(0.1,1,0.01), edges = NA,nodes=NA)
-
-cutoff[,-1] <- lapply(cutoff$cutoff ,function(n) {
-    logicmat<-distmat>n  
-  c(sum(logicmat, na.rm = TRUE),
-      sum(rowSums(logicmat,na.rm=TRUE)>0) %>%as.data.frame
-    )
-  }) %>% bind_rows
-
-setwd(Figures)
-ggplot(cutoff, aes(x= cutoff, y= edges)) + geom_line() +ggtitle("Edge Number is inversely proportional to cut off point") +xlab("Cut Off") +ylab(" Number of Edges")
-ggsave("Edgenumberday200.pdf")
-
-
-```
-
 Create distance matrix for each day
 ```{r}
   
