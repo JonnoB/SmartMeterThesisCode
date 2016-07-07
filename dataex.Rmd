@@ -7,7 +7,7 @@ output: html_document
 
 
 ```{r}
-packages <-c("stringr", "lubridate", "data.table", "R.utils", "corrplot", "Hmisc", "Amelia", "Matrix", "ff", "ggdendro", "zoo", "igraph","dplyr", "magrittr", "ggplot2", "tidyr", "xtable")
+packages <-c("stringr", "lubridate", "data.table","caret", "xgboost", "R.utils", "corrplot", "Hmisc", "Amelia", "Matrix", "ff", "ggdendro", "zoo", "igraph","dplyr", "magrittr", "ggplot2", "tidyr", "xtable")
 
 new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
@@ -651,10 +651,11 @@ nodeclust3<-nodeclust2[,-1] %>%
 
 
 #what does a density plot of the node stability look like?
-nodeclust4<-nodeclust2[,-1] %>%
+tempnames <-  names(nodeclust2)[-1] #transfers the node names, now tiblle prevents naming rows
+nodeclust4<-nodeclust2 %>% select(-ClustID) %>%
   mutate_each(funs((./sum(.))^2))%>%t %>%as.data.frame %>%
   mutate(rowsums = rowSums(.)) %>%
-  select(rowsums)%>%mutate(rownames = row.names(.))
+  select(rowsums)%>%mutate(rownames = tempnames)
 
 ggplot(nodeclust4, aes(x=rowsums)) +geom_density() +
   ggtitle("Density plot of node Stability") + xlab("sum of squared probability")
@@ -669,6 +670,7 @@ ggsave("stabilitydens.pdf")
 
 
 Make a cluster transition matrix
+and plot clusters across all days
 ```{r}
 
 Clustconversion <-lapply(1:length(nodeclustlist), function(n){
@@ -763,13 +765,15 @@ NodeDistrib<-NodeClustSoup[,-1] %>%
 names(NodeDistrib)<-ColumnNames
 rm(ColumnNames)
 
+
+tempnames <-  names(NodeClustSoup)[-1]
 #what does a density plot of the node stability look like?
 Nodestab <-NodeClustSoup[,-1] %>%
   mutate_each(funs((./sum(.))^2))%>%t %>%as.data.frame %>%
-  mutate(rowsums = rowSums(.)) %>%
-  select(rowsums)%>%mutate(rownames = row.names(.)) 
+  mutate(stability = rowSums(.)) %>%
+  select(stability)%>%mutate(NodeID = tempnames) 
 
-Nodestab%>% filter(rowsums<0.6, rowsums>0.4) %>%  ggplot(., aes(x=rowsums)) +geom_density() +
+Nodestab%>% filter(stability<0.6, stability>0.4) %>%  ggplot(., aes(x=stability)) +geom_density() +
   ggtitle("Density plot of node Stability") + xlab("sum of squared probability")
 setwd(file.path(Figures,"Method"))
 
@@ -821,13 +825,52 @@ write.graph(Clustertransgraph,
 ```
 
 
-
+Add in MOSAIC class and create some plots and a really terrible predictive model
 ```{r}
 setwd(datafile)
-Customadata<-read.csv("CustomerTestCellDefinition.csv")
+Customerdata<-read.csv("CustomerTestCellDefinition.csv") %>% 
+  mutate(NodeID =make.names(Location.ID), MosaicNumber = as.factor(Mosaic.Class) %>% as.numeric) %>% 
+  select(-Location.ID, -Customer.Type)
 
-table(Customadata$Tariff.Type)
-table(Customadata$Mo)
+table(Customerdata$Tariff.Type)
+table(Customerdata$Mosaic.Class)
+table(Customerdata$In.Out.Region)
+
+x <-Nodestab %>% left_join(., select(Customerdata, Mosaic.Class, NodeID), by="NodeID")
+
+#any mosaic pattern?
+ggplot(x, aes(colour= as.factor(Mosaic.Class), x= stability)) +geom_density()
+ggplot(x, aes(x= as.factor(Mosaic.Class), y= stability)) +geom_boxplot()
+
+
+NDM <-NodeDistrib %>% mutate(NodeID = rownames(.)) %>% 
+  left_join(., select(Customerdata, Mosaic.Class,MosaicNumber, NodeID), by="NodeID")%>%
+  select(-NodeID) 
+
+test <- train(x=NDM[,1:20], y=as.factor(NDM[,21]), method="xgbTree" )
+
+test2 <-confusionMatrix(test)$table %>% as.data.frame
+
+```
+
+
+
+```{r}
+NorXGtre <- xgboost(as.matrix(NDM[,1:20]), as.factor(NDM$MosaicNumber), 
+                    max.depth=5, 
+                    eta=0.10,
+                    nround = 100, 
+                    objective = "multi:softmax",
+                    num_class = 17,
+                    verbose = ifelse(interactive(), 1, 0),
+                    eval_metric ="merror")
+
+XGpreds <- predict(NorXGtre, as.matrix(NDM[,1:20]) )
+XGconf <- confusionMatrix(XGpreds, (NDM$MosaicNumber))
+
+test <- XGconf$table %>% data.frame() %>% spread(., key=Reference, value=Freq)
+
+Customerdata %>% group_by(MosaicNumber) %>%summarise(Mosaic.Class=first(Mosaic.Class))
 
 ```
 
