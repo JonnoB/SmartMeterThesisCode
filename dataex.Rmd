@@ -492,7 +492,7 @@ sum(totalnodes$count)
 ```
 
 Create a cluster Makeup vector
-Take the nodes that ake up each vector and construct a vector that includes all nodes and ones where a node is included in the cluster
+Take the nodes that make up each vector and construct a vector that includes all nodes and ones where a node is included in the cluster
 ```{r}
 
 #load day make graph save graph file as an graphml
@@ -647,16 +647,16 @@ Clustconversion <-lapply(1:length(nodeclustlist), function(n){
 
 
 
-test2 <-Clustconversion %>% select(-oldClustID)%>%
+ClusterDay <-Clustconversion %>% select(-oldClustID)%>%
   group_by(ClustID, day) %>% summarise(occurances=n())%>% ungroup %>%
   spread(key= day, occurances, fill=0) 
 
 #Plot clusters across time, with clusteres ordered by similarity
-
-#N.B the matrix is trnasposed so it the order of row column is reversed
-orderedheat(t(test2[,-1]), order="column", 
-                   xblocks=1,yblocks = 1, merge=1,
-                   mid =1, legend="Occurances") +ggtitle("Cluster occurance with ClusterID and Time\n ordered by similarity") +xlab("Time") +ylab("Cluster ID")
+  
+  #N.B the matrix is trnasposed so it the order of row column is reversed
+  orderedheat(ClusterDay[,-1], order="row", 
+                     xblocks=1,yblocks = 1, merge=1,
+                     mid =1, legend="Occurances") +ggtitle("Cluster occurance with ClusterID and Time\n ordered by similarity") +xlab("Time") +ylab("Cluster ID")
 setwd(file.path(Figures,"Method"))
 ggsave("Clusterocurrance.pdf")
 
@@ -687,7 +687,7 @@ remove<-c("dayx1", "dayx2","z","mcol","mrow", "remove")
 rm(list=remove)
 
 #How many times does each cluster occurr?
-ClustCounts <-Clustconversion %>% group_by(ClustID) %>% summarise(counts = n(), first=first(day))
+ClusterID <-Clustconversion %>% group_by(ClustID) %>% summarise(counts = n(), first=first(day))
 
 rowSums(nodeclust2[,-1])
 
@@ -707,11 +707,11 @@ percVolume[Large] %>%sum
 Filter the node cluster data frame so that small clusters are converted into soup
 ```{r}
 #turn all the small clusters to soup
-ClustCounts %<>% mutate(ClustIDSoup= ifelse(Large,ClustID,"Soup"))
-ClustCounts$ClustIDSoup
+ClusterID %<>% mutate(ClustIDSoup= ifelse(Large,ClustID,"Soup"))
 
-match(ClustCounts$ClustIDSoup, nodeclust2$ClustID)
-issoup <- ClustCounts$ClustIDSoup[match(nodeclust2$ClustID, ClustCounts$ClustID)]
+
+match(ClusterID$ClustIDSoup, nodeclust2$ClustID)
+issoup <- ClusterID$ClustIDSoup[match(nodeclust2$ClustID, ClusterID$ClustID)]
 NodeClustSoup<- nodeclust2 %>%mutate(ClustID=issoup) %>% 
   group_by(ClustID) %>% summarise_each(funs(sum)) %>%ungroup
 ```
@@ -741,18 +741,37 @@ setwd(file.path(Figures,"Method"))
 #the total number of nodes that have a stability outisde these points.
 (nodeclust4$rowsums>0.6 | nodeclust4$rowsums<0.4) %>%sum
 
+
+
+
+```
+
+Plot the nodes existance per day including soup
+```{r}
+test <-ClusterDay %>%   left_join(., 
+            select(ClusterID, ClustID, ClustIDSoup), 
+            by="ClustID") %>% select(-ClustID) %>% 
+  group_by(ClustIDSoup) %>% summarise_each(funs(sum)) %>%  ungroup
+  
+  test2 <- (select(test[-1,-244], -ClustIDSoup)>0)*1
+  orderedheat((test2), order="column", merge=1) +
+    ggtitle("Cluster Presence with Cluster\n and time Ordered by Similarity")+
+    xlab("Time") +ylab("Cluster")
+
+test3 <-createorder(test2)
+
 ```
 
 
 Create a second transition matrix where all clusters that do not have sufficienct nodevolume are consigned to the soup of "free" nodes
 ```{r}
 
-ClusTransSoup<- ClusterTransition %>% as.data.frame %>% mutate(ClustID=unlist(ClustCounts$ClustIDSoup)) %>%
+ClusTransSoup<- ClusterTransition %>% as.data.frame %>% mutate(ClustID=unlist(ClusterID$ClustIDSoup)) %>%
   group_by(ClustID) %>%
   summarise_each(funs(sum)) %>% ungroup
 rownames(ClusTransSoup)<- ClusTransSoup$ClustID
 ClusTransSoup <- ClusTransSoup %>% select(-ClustID) %>% t %>%
-  as.data.frame %>% mutate(ClustID=unlist(ClustCounts$ClustIDSoup)) %>%
+  as.data.frame %>% mutate(ClustID=unlist(ClusterID$ClustIDSoup)) %>%
   group_by(ClustID) %>%
   summarise_each(funs(sum)) %>% ungroup
 rownames(ClusTransSoup)<- ClusTransSoup$ClustID
