@@ -1,0 +1,54 @@
+---
+title: "Old code"
+author: "Jonathan Bourne"
+date: "23 June 2016"
+output: html_document
+---
+
+
+```{r}
+
+
+#The dataframe of start line and number of rows to read
+readdat <- data.frame(start.row= seq(0,153956821,100000), 
+           readnumber= c(rep(100000,1539),56821))
+
+#the vector of names to name each data frame
+namevect<- fread("TrialMonitoringDataHH.csv", nrows = 0, drop = c(2,3)) %>%
+  names %>% make.names 
+
+#loop through the readddat data frame and read a series of blocks of 100k rows remove all the time periods that are not used then save them as a csv, this minimises the amount of data and also makes loading and saving possible
+for (i in 20:1540){
+  filenum <- seq(0,1520,20)
+  rows <- (filenum[i]+1):(filenum[i]+20)
+smartdata <- lapply(rows, function(n){
+  smartdata<- fread("TrialMonitoringDataHH.csv", 
+                  skip = 1+readdat[n,1],
+                  nrows = readdat[n,2],
+                    drop = c(2,3), sep2= " ")
+  print(n)
+  #excludes the ireelevant columns sep2 names(smartdata)<- make.names(names(smartdata))
+    names(smartdata)<- namevect
+    smartdata <- smartdata %>% rename(Date.Time = Date.and.Time.of.capture) %>%
+    mutate(Date.Time = dmy_hms(Date.Time), hour = hour(Date.Time)) %>%
+    filter(hour >= 16, hour<=21)
+                  }
+                  )
+smartdata <- bind_rows(smartdata)
+setwd("./FourToNine")
+saveRDS(smartdata, paste("FourToNinePart",i ,".rds", sep=""))
+setwd("..")
+
+gc() #garbage collections seems to be important to stop filling up the memory with silt.
+}
+
+gc()
+
+
+setwd("./FourToNine")
+
+smartdata <- lapply(list.files(), readRDS) %>% bind_rows(.)
+
+```
+
+

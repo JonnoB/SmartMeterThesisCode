@@ -1,0 +1,833 @@
+---
+title: "Exploratory code"
+author: "Jonathan Bourne"
+date: "15 June 2016"
+output: html_document
+---
+
+
+```{r}
+packages <-c("stringr", "lubridate", "data.table", "R.utils", "corrplot", "Hmisc", "Amelia", "Matrix", "ff", "ggdendro", "zoo", "igraph","dplyr", "magrittr", "ggplot2", "tidyr", "xtable")
+
+new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+sapply(packages, library, character.only = TRUE)
+
+  
+```
+
+Project Folders
+```{r}
+basewd <- "C:/Users/pc1/Documents/Thesis Data"
+Figures <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University College London thesis/Figures")
+functioncode <- file.path(basewd, "Functions")
+SubDataSets <- file.path(basewd, "SubDataSets")
+datafile <- file.path(basewd, "TC1a")
+daytimeseries <-file.path(basewd,"clusterA")
+#setwd(file.path(basewd,"Power-Networks-LCL-June2015(withAcornGps).csv_Pieces"))
+Cormats <- file.path(basewd,"Cormats")
+```
+
+Source functions
+```{r}
+setwd(functioncode)
+sapply(list.files(), source)
+```
+
+#Load data
+
+The data is too large to load all at once and perform the filtering operation so the data will be loaded piecewise filtered then all the small pieces will be recombined as searching through the model becomes longer the further down the file it needs to go the file is broken into smaller chunks to keep loading times reasonable.
+
+```{r}
+setwd(datafile)
+smartdata <- fread("TrialMonitoringDataHH.csv", drop = c(2,3))
+saveRDS(smartdata[1:38400000,], "smartdata1.rds")
+saveRDS(smartdata[38400001:76800000,], "smartdata2.rds")
+saveRDS(smartdata[76800001:115200000,], "smartdata3.rds")
+saveRDS(smartdata[115200000:153956821,], "smartdata4.rds")
+rm(smartdata)
+
+files<- list.files()
+file.index<- grep(".rds", files)
+
+smartdata<- lapply(files[file.index], function(n){
+  smartdata <- readRDS(n)
+    print("i")
+      names(smartdata)<-  smartdata %>% names %>% make.names
+    smartdata <- smartdata %>% rename(Date.Time = Date.and.Time.of.capture) %>%
+    mutate(Date.Time = dmy_hms(Date.Time), hour = hour(Date.Time)) %>%
+    filter(hour >= 16, hour<=21)
+  }
+)
+
+smartdata <- bind_rows(smartdata)
+setwd(SubDataSets)
+saveRDS(smartdata, "filteredset.rds")
+```
+
+
+
+```{r}
+smartdata <- dcast(smartdata, Date.Time ~Location.ID, 
+              value.var = "Parameter", 
+              drop=FALSE)
+
+setwd(SubDataSets)
+saveRDS(smartdata,"smartdata.rds")
+
+#Create is na frame where 1 is valid and 0 is NA
+isnaframe <- 1-is.na(smartdata[,-1])*1
+saveRDS(isnaframe, "isnaframe.rds")
+#isnaframe <- readRDS("isnaframe.rds")
+rm(smartdata)
+
+#How much data is missing as a percentage of total
+1-sum(isnaframe)/(ncol(isnaframe)*nrow(isnaframe))
+
+#create the row column ordering for isnaframe
+ordering <- createorder(isnaframe, order="both", simMat= FALSE,xblocks=10, yblocks=10)
+saveRDS(ordering, "isnaordering.rds")
+```
+
+Pre cleaning unordered
+```{r}
+test <- orderedheat(isnaframe, order = "none", merge = 5, simMat = FALSE,
+                xblocks=10, yblocks=10, mid = 0.5, legend="Percent Valid")
+test+     
+    labs(x = "Date time",
+         y = "Smartmeter ID") +ggtitle("Missing data pre-cleaning")
+
+setwd(Figures)
+ggsave("unorderedPrecleaningmissing.pdf")
+rm(test)
+#smartmeter % complete data
+
+```
+
+
+Pre cleaning ordered
+```{r}
+test <- bigheat(isnaframe[ordering$Roworder,ordering$Colorder],
+                merge = 5,mid=0.5, legend="Percent Valid")
+test+     
+    labs(x = "Date time",
+         y = "Smartmeter ID") +ggtitle("Missing data pre-cleaning")
+ggsave("Precleaningmissing.pdf")
+rm(test)
+
+```
+
+
+
+highlighting smart meter groups i the correct time order. 
+As there are two clear groups of smartmeters and a group of smart meters that have not delivered very good quality information, it is important to look at how the clusters behave in normal time
+```{r}
+
+
+findbreak<- t(isnaframe[ordering$Roworder, ordering$Colorder[2500:8100]]) %>% as.data.frame %>%
+  mutate(rowsum = rowSums(.), 
+         diff= lag(rowsum,1), 
+         rowID= 1:nrow(.), 
+         rM=(rowsum + lag(rowsum)+lead(rowsum))/3) %>% 
+  select(rowsum, diff, rowID, rM)
+
+ggplot(findbreak, aes(x = rowID, y = rowsum)) + geom_line() +
+  ggtitle("Identifying break points in the smartmeter clusters") +
+  labs(x="Cluster ordered MeterIDs", y = "Number of Valid data points")
+ggsave("breakpoints.pdf")
+#break point at groups at 1:2380 and 2381:4530 add list of smart meters in the appendix along with time periods
+```
+
+
+Lower Cluster in shown in chronological time 
+```{r}
+
+#ensures aggregation happens correctly
+lowerclustID <- 2500:8100 #the smart meters to select
+
+test <- bigheat(isnaframe[,ordering$Colorder[lowerclustID]],
+                merge = 5,mid=0.5, legend="Percent Valid")
+test+     
+    labs(x = "Date time",
+         y = "Smartmeter ID") +ggtitle("Missing data pre-cleaning")
+
+ggsave("LowerPrecleaningmissing.pdf")
+
+```
+
+
+#Removing highly missing data
+
+Now the data is broken into two clusters of smart meters the time componant can be filtered to leave  high quality data set.
+
+
+
+Cleaning the cluster
+```{r}
+setwd(SubDataSets)
+#makes a matrix where 1 means there is data and 0 means NA
+lowerclust <- isnaframe[, ordering$Colorder[lowerclustID]]%>% as.data.frame
+saveRDS(lowerclust, "lowerclust.rds")
+lowertimepercs <- rowSums(lowerclust)/ncol(lowerclust)
+
+setwd(Figures)
+
+
+#create a data frame showing how many time periods have more than x% values
+nonmissing <- data.frame(cutoff = seq(0.1,1,0.01), TimePeriods =NA, SmartMeters = NA)
+
+nonmissing$TimePeriods <- sapply(nonmissing$cutoff ,function(n) {
+  sum(lowertimepercs>n, na.rm = TRUE)
+  })
+
+ggplot(nonmissing, aes(x= cutoff, y= TimePeriods)) + geom_line() +ggtitle("Number of Time Periods that have at least \nthe percentage of valid data indicated by the cut off") +xlab("Cut Off") +ylab("Number of Valid Time Periods")
+ggsave("NAtimeperiodslowerclust.pdf")
+
+
+#Remove Time periods with less than 75% valid data
+lowerclust <- lowerclust[lowertimepercs>0.9,]
+
+lowermeterpercs <- colSums(lowerclust)/nrow(lowerclust)
+
+nonmissing$SmartMeters <- sapply(nonmissing$cutoff ,function(n) {
+  sum(lowermeterpercs>n, na.rm = TRUE)
+  })
+
+ggplot(nonmissing, aes(x= cutoff, y= SmartMeters)) + geom_line() +ggtitle("Number smart meters that have at least \nthe percentage of valid data indicated by the cut off") +xlab("Cut Off") +ylab("Number of Valid smart meters")
+ggsave("NAsmartmeters.pdf")
+
+#filter the meters
+lowerclust <- lowerclust[,lowermeterpercs >0.99]
+
+#How much data is missing as a percentage of total post cleaning
+sum((lowerclust))/(ncol(lowerclust)*nrow(lowerclust))
+rm(isnaframe)
+rm(lowerclust)
+
+setwd(SubDataSets)
+smartdata <- readRDS("smartdata.rds")
+
+cleandat <-smartdata[,c(1,(1+meterhc$order[lowerclustID]))]
+size <- ncol(cleandat)*nrow(cleandat)
+cleandat <- cleandat[lowertimepercs>0.9, c(TRUE,lowermeterpercs >0.99)]
+
+ncol(cleandat)*nrow(cleandat)/size #amount of remaingin data
+
+saveRDS(cleandat, "cleandata.rds")
+
+```
+
+The result of cleaning both the cluster is that only minor smart meter removal specific removal needs to take place after the time periods have been cleaned up. This suggests that within the clusters data quality is strongly related related to time period and not to smart meter.
+
+
+How many days are full days?
+```{r}
+fulldays <- cleandat %>% group_by(date(Date.Time)) %>% summarise(total = n()) %>%
+  rename(Date.Time = `date(Date.Time)`)
+table(fulldays$total)
+
+```
+
+
+how many days have date 1 day before and 7 days before?
+```{r}
+weekdiff <- fulldays$Date.Time -ddays(7)
+sum(weekdiff %in% fulldays$Date.Time) #233 days
+
+weekdiff <- fulldays$Date.Time -ddays(1)
+sum(weekdiff %in% fulldays$Date.Time) #239 days
+
+sum(is.na(cleandat))
+```
+
+
+
+Fill in missing values by day time average, then average by day using a three time period window
+```{r}
+meantest <- test %>% mutate_each(funs(rollmean(.,3, align="right")))
+
+#find day half hour median for filling NA's
+timemeds <- cleandat %>% mutate(day= day(Date.Time), min = minute(Date.Time), hour = hour(Date.Time)) %>%
+  group_by(day, hour,min) %>%summarise_each(funs(mean(.,na.rm=TRUE))) %>% ungroup
+
+```
+
+
+Save each day as a file for making into graphs
+
+```{r}
+setwd(daytimeseries)
+saveCluster(test)
+```
+
+
+Cutoffs and edges?
+```{r}
+
+datdat<-readRDS(list.files()[100]) %>%ungroup
+
+# 
+# meantest <- datdat[,-1] %>% lapply(., function(n) 
+#   (rollmean(n,3, align="right"))%>% as.data.frame)
+# 
+# meantest <- bind_cols(meantest)
+# names(meantest)<- names(datdat)[-1]
+
+
+corlist <- datdat[,2:ncol(datdat)] %>% as.matrix %>% bigcor(., nblocks= 3, verbose = TRUE, method = "spearman")
+
+
+# corlist <- meantest[,1:ncol(meantest)] %>% as.matrix %>% bigcor(., nblocks= 6, verbose = TRUE, method = "pearson")
+
+corlist %<>%as.ffdf %>% as.data.frame
+distmat <- abs(corlist)
+
+diag(distmat) <- 0
+#number of links for given significance value
+cutoff <- data.frame(cutoff = seq(0.1,1,0.01), edges = NA,nodes=NA)
+
+cutoff[,-1] <- lapply(cutoff$cutoff ,function(n) {
+    logicmat<-distmat>n  
+  c(sum(logicmat, na.rm = TRUE),
+      sum(rowSums(logicmat,na.rm=TRUE)>0) %>%as.data.frame
+    )
+  }) %>% bind_rows
+
+setwd(Figures)
+ggplot(cutoff, aes(x= cutoff, y= edges)) + geom_line() +ggtitle("Edge Number is inversely proportional to cut off point") +xlab("Cut Off") +ylab(" Number of Edges")
+ggsave("Edgenumberday200.pdf")
+
+
+```
+
+Create distance matrix for each day
+```{r}
+  
+setwd(daytimeseries)
+files <-list.files()[32:33]
+for (i in 1:length(files)){
+  setwd(daytimeseries)
+  file <- files[i]
+  datdat<-readRDS(file) %>%ungroup
+  meterIDs <- names(datdat)[-1]
+  print("Data Loaded")
+  weightmat <- datdat[,2:ncol(datdat)] %>% 
+    as.matrix %>% cor
+    diag(weightmat) <- 0
+    setwd(Cormats)  
+    saveRDS(weightmat, paste(file,".rds",sep=""))
+    print(paste(i,"of",length(files))) 
+   }
+    
+    
+```
+
+Look at the number of edges for a large collection of days
+```{r}
+
+setwd(Cormats)  
+cutoff <- data.frame(cutoff = seq(0.1,1,0.05), edges = NA,nodes=NA)
+
+files <-list.files()
+
+x <-lapply(1:length(files), function(y){
+    distmat <-readRDS(files[y])
+    print(paste(y,"of", length(files)))
+    cutoffx <-cutoff  
+
+        cutoffx[,-1] <- lapply(cutoffx$cutoff ,function(n) {
+      logicmat<-distmat>n  
+      c(sum(logicmat, na.rm = TRUE),
+        sum(rowSums(logicmat,na.rm=TRUE)>0) %>%as.data.frame
+      )
+        }) %>% bind_rows
+          cutoffx}
+
+    )
+#setwd(SubDataSets)
+#saveRDS(x, "alldayscutoffs.rds")
+#x <- readRDS("alldayscutoffs.rds")
+
+edges <- data.frame(cutoff=cutoff[,1])
+
+for (i in 1:length(x)){
+edges  <-cbind(edges,x[[i]][,2])
+  
+}
+
+names(edges)[-1] <- make.names(1:(ncol(edges)-1))
+edgestats <- edges  %>% gather(., key=day, value= edges,-cutoff) %>% 
+  group_by(cutoff) %>%
+  summarise(mean = mean(edges), median =median(edges),stdev = sd(edges)) %>%
+  mutate(upper=mean+stdev, lower= mean-stdev) %>% ungroup %>% 
+  gather(., key=Average, value, -cutoff, -(stdev:lower))
+
+setwd(file.path(Figures,"Method"))
+
+edgestats %>% ggplot(., aes(x=cutoff)) +
+  geom_ribbon(aes(ymin=lower, ymax=upper), fill="grey70")+
+  geom_line(aes( y =value, color= Average))+
+  ggtitle("Mean and median edges with standard deviation")
+ggsave("Meanedges.pdf")
+
+
+nodes <- data.frame(cutoff=cutoff[,1])
+
+for (i in 1:length(x)){
+nodes  <-cbind(nodes,x[[i]][,3])
+  
+}
+
+names(nodes)[-1] <- make.names(1:(ncol(nodes)-1))
+nodestats <- nodes  %>% gather(., key=day, value= nodes,-cutoff) %>% 
+  group_by(cutoff) %>%
+  summarise(mean = mean(nodes), median =median(nodes),stdev = sd(nodes)) %>%
+  mutate(upper=mean+stdev, lower= mean-stdev) %>% ungroup %>% 
+  gather(., key=Average, value, -cutoff, -(stdev:lower))
+
+nodestats %>% filter(Average== "mean") %>% ggplot(., aes(x=cutoff)) +
+  geom_line(aes( y =value), colour="black")+
+  ggtitle("Mean number of Nodes and variance")
+ggsave("Meannodes.pdf")
+
+
+#make plot that combines edges and nodes as a percent
+
+edgestats2 <- edgestats %>% mutate(Average= paste("Edge", Average),
+                                   upper=upper/(5209*5208/2),
+                                   lower = lower/(5209*5208/2),
+                                   value = value/(5209*5208/2))
+
+nodestats2 <- nodestats %>% mutate(Average= paste("Node", Average),
+                                   upper=upper/5209,
+                                   lower = lower/5209,
+                                   value = value/5209)
+
+bind_rows(edgestats2,nodestats2) %>% filter(Average !="Node median") %>%
+  ggplot(., aes(x=cutoff)) +
+  geom_ribbon(aes(ymin=lower, ymax=upper, colour = Average), fill="grey70")+
+  geom_line(aes( y =value, color= Average))+
+  ggtitle("Mean and median edges with standard deviation")
+ggsave("Edgenodeperc.pdf")
+
+
+nodestats2 %>% select(cutoff,Average ,value) %>% 
+  mutate(value= value-edgestats2$value) %>% 
+  filter(Average=="Node mean") %>%
+  ggplot(., aes(x= cutoff, y=value)) +
+  geom_line()+ ggtitle("Difference between Remaining Node and Edge means")
+  ggsave("EdgeNodeDiff.pdf")
+
+```
+
+
+Create graph
+NA's caused an automatic link and so all NA's were replaced with 0's
+```{r}
+
+setwd(daytimeseries)
+filename <- list.files()[100]#day 100 is the cool ring graph when cut off is .92
+graph <- createweightmat(filename)
+graph2 <-createcleangraph(graph, graph>0.7, 10)
+graph2 <-detectcomms(graph2)
+setwd(SubDataSets)
+write.graph(graph2, "test3.graphml", format = "graphml")
+
+get.vertex.attribute(graph2, "ClusterID") %>% unique()
+
+fc <-fastgreedy.community(graph2)
+wc <-walktrap.community(graph2)
+sc <- spinglass.community(graph2)
+
+membership(wc) %>% unique 
+```
+
+
+```{r}
+setwd(Cormats)
+filename <- list.files()[100]
+file <- readRDS(filename)
+graph3 <- createcleangraph2(file, file >0.7)
+graph3 <-detectcomms(graph3)
+setwd(SubDataSets)
+write.graph(graph3, "manteng.graphml", format = "graphml")
+
+wc <- walktrap.community(graph3)
+fc <- fastgreedy.community(graph3)
+modularity(wc)
+
+
+#Is it worth comparing the structual similarity of the betweenes of the graphs by doing a corellation matrix of the graph betweeness for all graphs?
+betweengraph3 <- betweenness(graph3)
+
+```
+
+
+Comparing load profiles across communities
+```{r}
+setwd(daytimeseries)
+timeseries <- list.files()[100]
+daydata <- readRDS(timeseries) 
+rownames(daydata) <- daydata[,1] %>% make.names()
+colnames(daydata) <- daydata %>% names %>%make.names()
+
+daydata <- daydata[,-1]%>%t %>% as.data.frame()
+  
+clusters <-data.frame(NodeID= get.vertex.attribute(graph3, "name"), 
+             ClusterID = get.vertex.attribute(graph3, "ClusterID"))
+
+
+daydata <- daydata %>% mutate(NodeID = rownames(.)) %>%
+  left_join(., clusters, by="NodeID") %>% 
+  select(-NodeID) 
+
+daydata2<- daydata %>% group_by(ClusterID) %>% mutate(count=1) %>%
+  summarise_each(funs(sum)) %>% ungroup%>% 
+    gather(.,key=time, value=kwh, -ClusterID, -count) %>%
+  mutate(time= ymd_hms(sub("X","",time)))
+
+setwd(Figures)
+daydata2 %>% filter(count>50) %>% ggplot(., aes(x=time, y=kwh, colour= ClusterID)) + geom_line() + 
+  ggtitle("Sum Cluster Profiles")
+ggsave("singledaypatternSum.pdf")
+
+daydata3<- daydata %>%
+  group_by(ClusterID) %>% mutate(count=n()) %>%
+  summarise_each(funs(mean)) %>% ungroup%>% 
+    gather(.,key=time, value=kwh, -ClusterID, -count) %>%
+  mutate(time= ymd_hms(sub("X","",time)))
+
+
+daydata3%>% filter(count>50) %>% ggplot(., aes(x=time, y=kwh, colour= ClusterID)) + 
+  geom_line() + 
+  ggtitle("Mean Cluster Profiles")
+ggsave("singledaypatternMean.pdf")
+
+
+daydata4<- daydata %>%
+  group_by(ClusterID) %>% mutate(count=n()) %>%
+  summarise_each(funs(median)) %>% ungroup%>% 
+    gather(.,key=time, value=kwh, -ClusterID, -count) %>%
+  mutate(time= ymd_hms(sub("X","",time)))
+
+
+daydata4%>% filter(count>50) %>% ggplot(., aes(x=time, y=kwh, colour= ClusterID)) + 
+  geom_line() + 
+  ggtitle("Median Cluster Profiles")
+ggsave("singledaypatternMedian.pdf")
+
+totalnodes <-daydata %>% group_by(ClusterID) %>% summarise(count = n()) %>%
+  filter(count>50)
+
+xtable(totalnodes) %>% write(., "totalnodes.tex")
+
+xtable(totalnodes) %>% print(., type="latex", file="totalnodes.tex")
+
+sum(totalnodes$count)
+
+#there are two different ways of ID'ing clusters. using nodes similarity or using cluster behavioural pattern.
+
+```
+
+Create a cluster Makeup vector
+Take the nodes that ake up each vector and construct a vector that includes all nodes and ones where a node is included in the cluster
+```{r}
+
+#load day make graph save graph file as an graphml
+setwd(Cormats)
+files <-list.files()
+for (i in 39:length(files)){
+  setwd(Cormats)
+  fileid <- readRDS(files[i])
+  graph <- createcleangraph2(fileid, fileid >0.7)
+  print("Graph created")
+  graph <-detectcomms(graph)
+  print("Clusters detected")
+  setwd(file.path(basewd,"behaviourgraphs70"))
+  filename <- sub(".rds","",files[i])
+  write.graph(graph, paste(filename ,".graphml",sep=""), format = "graphml")
+  print(paste("Completed",i,"of",length(files))) 
+   }
+
+
+
+
+#Load each graph file and create a list of clust vector matrices
+setwd(file.path(basewd,"behaviourgraphs70"))
+
+
+nodeclustlist <-lapply(list.files(), function(n){
+  graph <- read_graph(n, format="graphml")
+  vertices <-data.frame(NodeID= V(graph)$name, 
+                      cluster=
+                        get.vertex.attribute(graph, "ClusterID")) %>%
+                        mutate(yesno=1)%>%
+  spread(., key= cluster, value=yesno) %>% 
+  mutate(NodeID= as.character(NodeID))
+  print(n)
+  vertices
+}
+)
+
+setwd(SubDataSets)
+saveRDS(nodeclustlist, "nodeclustlist.rds")
+#nodeclustlist <- readRDS("nodeclustlist.rds")
+
+#make a dataframe that contains all nodes
+setwd(daytimeseries)
+
+NodeClust<- readRDS(list.files()[1]) %>%names() 
+NodeClust<- NodeClust[-1]
+NodeClust<- data.frame(NodeID=as.character(NodeClust[-1])%>% 
+  make.names) %>%mutate(NodeID = as.character(NodeID))
+
+
+#combine all cluster matrices into a single cluster matrix
+testmat <- Reduce(function(...) merge(..., 
+                                      by="NodeID", 
+                                      all=TRUE), 
+                  nodeclustlist)
+
+NodeClust<-left_join(NodeClust, testmat,key="NodeID")
+
+
+#names(NodeClust)[-1]<-make.names(1:ncol(NodeClust[,-1])) #give them all unique names
+NodeClust[is.na(NodeClust)] <- 0
+setwd(SubDataSets)
+saveRDS(NodeClust, "NodeClust.rds")
+#NodeClust<-readRDS("NodeClust.rds")
+```
+
+
+
+Look at clusters across time periods and create a jaccard similarity matrix.
+```{r}
+
+jaccardclust <- jaccard(t(NodeClust[,-1])) %>% as.matrix %>%as.data.frame
+
+bigheat(jaccardclust, order="both", 
+                   xblocks=1,yblocks = 1, merge=5,
+                   simMat = TRUE) +ggtitle("Community Jaccard similarity") + 
+  xlab("Communities") + ylab("Communities")
+setwd(Figures, "Method")
+ggsave("jaccardclust.pdf")
+
+jaccardclust <- createcleangraph(jaccardclust,
+                                 jaccardclust>0.99, 
+                                 mincons = 0,
+                                 sweep=FALSE)
+ecount(jaccardclust)
+jaccardclust <- detectcomms(jaccardclust)
+jaccardclust <- set.vertex.attribute(jaccardclust, 
+                                name = "size", index = V(jaccardclust), 
+                                value = colSums(NodeClust[,-1]))
+setwd(SubDataSets)
+write.graph(jaccardclust, "jaccardclust.graphml", format = "graphml")
+saveRDS(jaccardclust,"jaccardclust.rds")
+#jaccardclust <-readRDS("jaccardclust.rds")
+
+wc<- walktrap.community(jaccardclust)
+modularity(wc)
+
+jaccardIDs <- data.frame(ClusterID =get.vertex.attribute(jaccardclust, "ClusterID") ) %>% group_by(ClusterID) %>% summarise(counts = n())
+
+
+#add in correct cluster ID's aggregate and get total number of occurances of each node per cluster
+nodeclust2 <- NodeClust#testmat
+rownames(nodeclust2) <-nodeclust2[,1]
+nodeclust2<-nodeclust2[,-1] %>%t %>%as.data.frame %>%
+mutate(ClustID = get.vertex.attribute(jaccardclust, "ClusterID") ) %>% group_by(ClustID) %>% 
+  summarise_each(funs(sum(., na.rm= TRUE))) %>% ungroup() 
+rownames(nodeclust2) <-nodeclust2[,1] %>%as.matrix()
+
+
+
+
+#What percentage of days are the nodes in each cluster?
+#The nodes don't appear each day so need to be divided by the total number of appearences they may not the total number of days.
+nodeclust3<-nodeclust2[,-1] %>%
+  mutate_each(funs(./sum(.)))%>%t %>%as.data.frame
+
+
+#what does a density plot of the node stability look like?
+nodeclust4<-nodeclust2[,-1] %>%
+  mutate_each(funs((./sum(.))^2))%>%t %>%as.data.frame %>%
+  mutate(rowsums = rowSums(.)) %>%
+  select(rowsums)%>%mutate(rownames = row.names(.))
+
+ggplot(nodeclust4, aes(x=rowsums)) +geom_density() +
+  ggtitle("Density plot of node Stability") + xlab("sum of squared probability")
+setwd(file.path(Figures,"Method"))
+ggsave("stabilitydens.pdf")
+ 
+ #Boxplot of social class broken out by stability 
+
+
+```
+
+
+
+Make a cluster transition matrix
+```{r}
+
+Clustconversion <-lapply(1:length(nodeclustlist), function(n){
+      day <-data.frame(oldClustID=nodeclustlist[[n]][,-1] %>%
+                   names %>% as.character) %>%
+    mutate(day=n)
+      day
+      } 
+    ) %>%bind_rows %>% 
+  mutate(ClustID=
+           get.vertex.attribute(jaccardclust, "ClusterID")
+)
+
+
+
+test2 <-Clustconversion %>% select(-oldClustID)%>%
+  group_by(ClustID, day) %>% summarise(occurances=n())%>% ungroup %>%
+  spread(key= day, occurances, fill=0) 
+
+#Plot clusters across time, with clusteres ordered by similarity
+
+#N.B the matrix is trnasposed so it the order of row column is reversed
+orderedheat(t(test2[,-1]), order="column", 
+                   xblocks=1,yblocks = 1, merge=1,
+                   mid =1, legend="Occurances") +ggtitle("Cluster occurance with ClusterID and Time\n ordered by similarity") +xlab("Time") +ylab("Cluster ID")
+setwd(file.path(Figures,"Method"))
+ggsave("Clusterocurrance.pdf")
+
+
+#find the counts of nodes transfering from one cluster to another across each turn by finding the the turnwise A*B matrix for the clusters in adjacent turns, add the results of that matrix multiplication to a matrix that contains all clusters
+
+totalclusts <- unique(Clustconversion$ClustID) %>% length
+ClusterTransition<- matrix(data=0, nrow= totalclusts, ncol=totalclusts,
+                           dimnames = list(unique(Clustconversion$ClustID),
+                                           unique(Clustconversion$ClustID)))
+
+for(i in 2:max(Clustconversion$day)){
+dayx1 <-NodeClust[,-1][,(Clustconversion$day==(i-1))]
+dayx2 <-NodeClust[,-1][,(Clustconversion$day==i)]
+
+z <- t(dayx2) %*% as.matrix(dayx1) 
+colnames(z) <- Clustconversion$ClustID[Clustconversion$day==(i-1)]
+rownames(z) <- Clustconversion$ClustID[Clustconversion$day==i]
+
+mcol<-match(colnames(z),colnames(ClusterTransition))
+mrow<-match(rownames(z),rownames(ClusterTransition))
+
+ClusterTransition[mrow, mcol] <-ClusterTransition[mrow, mcol]+z
+print(i)
+}
+#removes all objects created by the for loop, also removes the vector itself for lols.
+remove<-c("dayx1", "dayx2","z","mcol","mrow", "remove")
+rm(list=remove)
+
+#How many times does each cluster occurr?
+ClustCounts <-Clustconversion %>% group_by(ClustID) %>% summarise(counts = n(), first=first(day))
+
+rowSums(nodeclust2[,-1])
+
+#how many clusters contain over 1% of total node volume?
+NodeVolume <- sum(nodeclust2[,-1])
+percVolume <- rowSums(nodeclust2[,-1])/NodeVolume
+Large <- percVolume>0.01
+sum(Large)
+percVolume[Large]
+#how much of the total node volume do these nodes account for?
+percVolume[Large] %>%sum
+
+```
+
+
+
+Filter the node cluster data frame so that small clusters are converted into soup
+```{r}
+#turn all the small clusters to soup
+ClustCounts %<>% mutate(ClustIDSoup= ifelse(Large,ClustID,"Soup"))
+ClustCounts$ClustIDSoup
+
+match(ClustCounts$ClustIDSoup, nodeclust2$ClustID)
+issoup <- ClustCounts$ClustIDSoup[match(nodeclust2$ClustID, ClustCounts$ClustID)]
+NodeClustSoup<- nodeclust2 %>%mutate(ClustID=issoup) %>% 
+  group_by(ClustID) %>% summarise_each(funs(sum)) %>%ungroup
+```
+
+Explore the properties of the the new node cluster distribution
+```{r}
+#What percentage of days are the nodes in each cluster?
+#The nodes don't appear each day so need to be divided by the total number of appearences they may not the total number of days.
+ColumnNames<- NodeClustSoup$ClustID
+NodeDistrib<-NodeClustSoup[,-1] %>%
+  mutate_each(funs(./sum(.)))%>%t %>%as.data.frame
+names(NodeDistrib)<-ColumnNames
+rm(ColumnNames)
+
+#what does a density plot of the node stability look like?
+Nodestab <-NodeClustSoup[,-1] %>%
+  mutate_each(funs((./sum(.))^2))%>%t %>%as.data.frame %>%
+  mutate(rowsums = rowSums(.)) %>%
+  select(rowsums)%>%mutate(rownames = row.names(.)) 
+
+Nodestab%>% filter(rowsums<0.6, rowsums>0.4) %>%  ggplot(., aes(x=rowsums)) +geom_density() +
+  ggtitle("Density plot of node Stability") + xlab("sum of squared probability")
+setwd(file.path(Figures,"Method"))
+
+#the total number of nodes that have a stability outisde these points.
+(nodeclust4$rowsums>0.6 | nodeclust4$rowsums<0.4) %>%sum
+
+```
+
+
+Create a second transition matrix where all clusters that do not have sufficienct nodevolume are consigned to the soup of "free" nodes
+```{r}
+
+ClusTransSoup<- ClusterTransition %>% as.data.frame %>% mutate(ClustID=unlist(ClustCounts$ClustIDSoup)) %>%
+  group_by(ClustID) %>%
+  summarise_each(funs(sum)) %>% ungroup
+rownames(ClusTransSoup)<- ClusTransSoup$ClustID
+ClusTransSoup <- ClusTransSoup %>% select(-ClustID) %>% t %>%
+  as.data.frame %>% mutate(ClustID=unlist(ClustCounts$ClustIDSoup)) %>%
+  group_by(ClustID) %>%
+  summarise_each(funs(sum)) %>% ungroup
+rownames(ClusTransSoup)<- ClusTransSoup$ClustID
+ClusTransSoup <- ClusTransSoup %>% select(-ClustID) %>% t
+
+```
+
+Make a graph of the transition matrix removing the soup node.
+```{r}
+clustrans2 <- ClusTransSoup[-1,-1]
+Clustertransgraph = graph.adjacency(clustrans2, 
+                          mode = "directed",
+                          weighted = TRUE, diag = TRUE)
+
+ecount(Clustertransgraph)
+Clustertransgraph<- set.vertex.attribute(Clustertransgraph, 
+                                         "size",
+                     index = V(Clustertransgraph),
+                     value=
+                       rowSums(ClusTransSoup)*50/max(rowSums(ClusTransSoup)))
+
+get.edge.attribute(Clustertransgraph,"weight")
+get.vertex.attribute(Clustertransgraph,"size")
+setwd(SubDataSets)
+write.graph(Clustertransgraph, 
+            "Clustertransgraph.graphml", 
+            format = "graphml")
+
+#Clustertransgraph<- read.graph("Clustertransgraph.graphml",format = "graphml")
+
+```
+
+
+
+```{r}
+setwd(datafile)
+Customadata<-read.csv("CustomerTestCellDefinition.csv")
+
+table(Customadata$Tariff.Type)
+table(Customadata$Mo)
+
+```
+
