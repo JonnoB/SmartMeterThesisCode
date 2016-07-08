@@ -211,6 +211,7 @@ ggsave("NAsmartmeters.pdf")
 
 #filter the meters
 lowerclust <- lowerclust[,lowermeterpercs >0.99]
+totalmeters <- sum(lowermeterpercs >0.99)
 
 #How much data is missing as a percentage of total post cleaning
 sum((lowerclust))/(ncol(lowerclust)*nrow(lowerclust))
@@ -335,7 +336,7 @@ edges <- data.frame(cutoff=cutoff[,1])
 for (i in 1:length(x)){
 edges  <-cbind(edges,x[[i]][,2])
   
-}
+} %>% as.data.frame
 
 names(edges)[-1] <- make.names(1:(ncol(edges)-1))
 edgestats <- edges  %>% gather(., key=day, value= edges,-cutoff) %>% 
@@ -358,7 +359,7 @@ nodes <- data.frame(cutoff=cutoff[,1])
 for (i in 1:length(x)){
 nodes  <-cbind(nodes,x[[i]][,3])
   
-}
+} %>% as.data.frame()
 
 names(nodes)[-1] <- make.names(1:(ncol(nodes)-1))
 nodestats <- nodes  %>% gather(., key=day, value= nodes,-cutoff) %>% 
@@ -401,6 +402,35 @@ nodestats2 %>% select(cutoff,Average ,value) %>%
   ggsave("EdgeNodeDiff.pdf")
 
 ```
+
+```{r ER vs dataset}
+
+#create a dataframe with the number of required edges and the space for the iterations
+DataVsER <- edgestats %>% filter(Average=="mean")%>%
+  select(cutoff, value)%>% rename(edges= value) %>% 
+  cbind(., data.frame(matrix(data=NA,nrow=nrow(.), ncol = 20)))
+
+#generate 20*19 graphs
+for(n in 1:20){
+for(i in 1:nrow(DataVsER)){
+g <- sample_gnm(totalmeters, DataVsER$edges[i])
+DataVsER[i,2+n] <- totalmeters-(degree(g)==0) %>% sum
+print(paste("graph", i, "of iteration", n))
+}
+
+}
+rm(g)
+#find the average number of valid rows
+DataVsER[,-c(1:2)] %>%rowMeans()
+
+#there is zero std dev on all rows apart from row 18 which has a very small standard deviation
+DataVsER[18,-c(1:2)] %>%sd
+
+#conclusion is that there is a clear and significant different between the number of isolated nodes in the data we are using and an ER graph
+
+```
+
+
 
 #Creating Graphs
 
@@ -682,6 +712,12 @@ Clustconversion <-lapply(1:length(nodeclustlist), function(n){
 rm(dayorder)
 
 
+
+```
+
+
+What clusters are present on each day?
+```{r Cluster Plots}
 Clustconversion %>% filter(NodesInCLuster>50, IntraDayRank<=5) %>%
   ggplot(.,aes(x=date, y= NodesInCLuster, colour= as.factor(IntraDayRank))) +
   geom_line()+ggtitle("Top 5 clusters plotted by rank across all days") +
@@ -699,11 +735,7 @@ Clustsperday %>% gather(., Clustertype,number,-date) %>%
   ggtitle("Number of clusters a day, with total \nclusters and cluster of more than 50 nodes")
 ggsave("TotalClusters.pdf")
 
-```
 
-
-What clusters are present on each day?
-```{r}
 #make a data frame that shows the wheather the cluster was present on a given day
 ClusterDay <-Clustconversion %>% select(ClustID,day)%>%
   group_by(ClustID, day) %>% summarise(occurances=n())%>% ungroup %>%
@@ -721,7 +753,7 @@ ggsave("Clusterocurrance.pdf")
 ```
 
 Find the counts of nodes transfering from one cluster to another across each turn by finding the the turnwise A*B matrix for the clusters in adjacent turns, add the results of that matrix multiplication to a matrix that contains all clusters
-```{r transitioncounts}
+```{r Tansition counts}
 
 
 totalclusts <- unique(Clustconversion$ClustID) %>% length
