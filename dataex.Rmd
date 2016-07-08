@@ -6,6 +6,18 @@ output: html_document
 ---
 
 
+Degreeness of the graphs
+Betweeness
+Life expectancy
+
+order clusters by size and plot the results
+
+predicitve model
+
+is there a sig lower stdved for clusters compared to un clustered. load profiles
+
+Look at the sensitivity of the model etc, eg corellation cut off amount of days available,...
+
 ```{r}
 packages <-c("stringr", "lubridate", "data.table","caret", "xgboost", "R.utils", "corrplot", "Hmisc", "Amelia", "Matrix", "ff", "ggdendro", "zoo", "igraph","dplyr", "magrittr", "ggplot2", "tidyr", "xtable")
 
@@ -164,7 +176,7 @@ Now the data is broken into two clusters of smart meters the time componant can 
 
 
 Cleaning the cluster
-```{r}
+```{r cleaningthedata}
 setwd(SubDataSets)
 #makes a matrix where 1 means there is data and 0 means NA
 lowerclust <- isnaframe[, ordering$Colorder[lowerclustID]]%>% as.data.frame
@@ -220,6 +232,7 @@ saveRDS(cleandat, "cleandata.rds")
 
 The result of cleaning both the cluster is that only minor smart meter removal specific removal needs to take place after the time periods have been cleaned up. This suggests that within the clusters data quality is strongly related related to time period and not to smart meter.
 
+#Exploring the data
 
 How many days are full days?
 ```{r}
@@ -255,18 +268,18 @@ timemeds <- cleandat %>% mutate(day= day(Date.Time), min = minute(Date.Time), ho
 
 
 Save each day as a file for making into graphs
-
-```{r}
+#this chunk got destroyed by mistake and needs to be written again
+```{r savedaydata}
 setwd(daytimeseries)
 saveCluster(test)
 ```
 
 
 Create distance matrix for each day
-```{r}
+```{r distmatday}
   
 setwd(daytimeseries)
-files <-list.files()[32:33]
+files <-list.files()
 for (i in 1:length(files)){
   setwd(daytimeseries)
   file <- files[i]
@@ -285,7 +298,7 @@ for (i in 1:length(files)){
 ```
 
 Look at the number of edges for a large collection of days
-```{r}
+```{r totaledges}
 
 setwd(Cormats)  
 cutoff <- data.frame(cutoff = seq(0.1,1,0.05), edges = NA,nodes=NA)
@@ -382,10 +395,11 @@ nodestats2 %>% select(cutoff,Average ,value) %>%
 
 ```
 
+#Creating Graphs
 
 Create graph
 NA's caused an automatic link and so all NA's were replaced with 0's
-```{r}
+```{r singlegraph}
 
 setwd(daytimeseries)
 filename <- list.files()[100]#day 100 is the cool ring graph when cut off is .92
@@ -425,8 +439,8 @@ betweengraph3 <- betweenness(graph3)
 ```
 
 
-Comparing load profiles across communities
-```{r}
+#Comparing load profiles across communities
+```{r dayloadprofile}
 setwd(daytimeseries)
 timeseries <- list.files()[100]
 daydata <- readRDS(timeseries) 
@@ -491,9 +505,9 @@ sum(totalnodes$count)
 
 ```
 
-Create a cluster Makeup vector
-Take the nodes that make up each vector and construct a vector that includes all nodes and ones where a node is included in the cluster
-```{r}
+
+Make and save all graphs
+```{r makeallgraphs}
 
 #load day make graph save graph file as an graphml
 setwd(Cormats)
@@ -512,7 +526,12 @@ for (i in 39:length(files)){
    }
 
 
+```
 
+
+Create a cluster Makeup vector
+Take the nodes that make up each vector and construct a vector that includes all nodes and ones where a node is included in the cluster
+```{r}
 
 #Load each graph file and create a list of clust vector matrices
 setwd(file.path(basewd,"behaviourgraphs70"))
@@ -530,6 +549,8 @@ nodeclustlist <-lapply(list.files(), function(n){
   vertices
 }
 )
+
+names(nodeclustlist)<-sub(".rds", "",files) %>%sub("date_ ","",.) %>%ymd
 
 setwd(SubDataSets)
 saveRDS(nodeclustlist, "nodeclustlist.rds")
@@ -558,8 +579,8 @@ NodeClust[is.na(NodeClust)] <- 0
 setwd(SubDataSets)
 saveRDS(NodeClust, "NodeClust.rds")
 #NodeClust<-readRDS("NodeClust.rds")
-```
 
+```
 
 
 Look at clusters across time periods and create a jaccard similarity matrix.
@@ -632,22 +653,52 @@ ggsave("stabilitydens.pdf")
 
 Make a cluster transition matrix
 and plot clusters across all days
-```{r}
+
+Make a conversion table for original cluster names to new cluster names
+also 
+```{r clusterconversion}
+#get day order from the nodeclustlist object
+dayorder <- names(nodeclustlist)%>%ymd
 
 Clustconversion <-lapply(1:length(nodeclustlist), function(n){
       day <-data.frame(oldClustID=nodeclustlist[[n]][,-1] %>%
                    names %>% as.character) %>%
-    mutate(day=n)
+    mutate(day=n, date=dayorder[n],
+           NodesInCLuster=colSums(nodeclustlist[[n]][,-1], na.rm=TRUE),
+           IntraDayRank=rank(-(NodesInCLuster),ties.method="random"))
       day
       } 
     ) %>%bind_rows %>% 
   mutate(ClustID=
            get.vertex.attribute(jaccardclust, "ClusterID")
 )
+rm(dayorder)
 
 
+Clustconversion %>% filter(NodesInCLuster>50, IntraDayRank<=5) %>%
+  ggplot(.,aes(x=date, y= NodesInCLuster, colour= as.factor(IntraDayRank))) +
+  geom_line()+ggtitle("Top 5 clusters plotted by rank across all days") +
+  guides(colour=guide_legend(title="Intra day rank"))+ylab("Number of nodes in Cluster")
+setwd(file.path(Figures, "Method"))
+ggsave("Clusterrank.pdf")
 
-ClusterDay <-Clustconversion %>% select(-oldClustID)%>%
+Clustsperday<- Clustconversion %>% group_by(date) %>% 
+  summarise(totalclusts=n(), significantClusts=sum(NodesInCLuster>50)) %>%
+  ungroup
+
+Clustsperday %>% gather(., Clustertype,number,-date) %>%
+  ggplot(., aes(x=date, y= number, colour=Clustertype)) +geom_line()+
+  ylab("Total number of Clusters")+
+  ggtitle("Number of clusters a day, with total \nclusters and cluster of more than 50 nodes")
+ggsave("TotalClusters.pdf")
+
+```
+
+
+What clusters are present on each day?
+```{r}
+#make a data frame that shows the wheather the cluster was present on a given day
+ClusterDay <-Clustconversion %>% select(ClustID,day)%>%
   group_by(ClustID, day) %>% summarise(occurances=n())%>% ungroup %>%
   spread(key= day, occurances, fill=0) 
 
@@ -660,8 +711,11 @@ ClusterDay <-Clustconversion %>% select(-oldClustID)%>%
 setwd(file.path(Figures,"Method"))
 ggsave("Clusterocurrance.pdf")
 
+```
 
-#find the counts of nodes transfering from one cluster to another across each turn by finding the the turnwise A*B matrix for the clusters in adjacent turns, add the results of that matrix multiplication to a matrix that contains all clusters
+Find the counts of nodes transfering from one cluster to another across each turn by finding the the turnwise A*B matrix for the clusters in adjacent turns, add the results of that matrix multiplication to a matrix that contains all clusters
+```{r transitioncounts}
+
 
 totalclusts <- unique(Clustconversion$ClustID) %>% length
 ClusterTransition<- matrix(data=0, nrow= totalclusts, ncol=totalclusts,
@@ -705,7 +759,7 @@ percVolume[Large] %>%sum
 
 
 Filter the node cluster data frame so that small clusters are converted into soup
-```{r}
+```{r ConvertToSoup}
 #turn all the small clusters to soup
 ClusterID %<>% mutate(ClustIDSoup= ifelse(Large,ClustID,"Soup"))
 
@@ -753,8 +807,8 @@ test <-ClusterDay %>%   left_join(.,
             by="ClustID") %>% select(-ClustID) %>% 
   group_by(ClustIDSoup) %>% summarise_each(funs(sum)) %>%  ungroup
   
-  test2 <- (select(test[-1,-244], -ClustIDSoup)>0)*1
-  orderedheat((test2), order="column", merge=1) +
+  test2 <- (select(test[-1,-1], -ClustIDSoup)>0)*1#select(test, -ClustIDSoup) #(select(test[-1,], -ClustIDSoup)>0)*1
+  orderedheat((test2), order="none", merge=1) +
     ggtitle("Cluster Presence with Cluster\n and time Ordered by Similarity")+
     xlab("Time") +ylab("Cluster")
 
