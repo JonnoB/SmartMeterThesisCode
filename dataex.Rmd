@@ -25,7 +25,7 @@ new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
 
 sapply(packages, library, character.only = TRUE)
-
+rm(list=c("packages",  "new.packages"))
   
 ```
 
@@ -33,10 +33,10 @@ Project Folders
 ```{r}
 basewd <- "C:/Users/pc1/Documents/Thesis Data"
 Figures <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University College London thesis/Figures")
-functioncode <- file.path(basewd, "Functions")
+functioncode <- file.path(basewd, "SmartMeterThesisCode","Functions")
 SubDataSets <- file.path(basewd, "SubDataSets")
 datafile <- file.path(basewd, "TC1a")
-daytimeseries <-file.path(basewd,"Cleandata")
+daytimeseries <-file.path(basewd,"CleandataNAs")
 #setwd(file.path(basewd,"Power-Networks-LCL-June2015(withAcornGps).csv_Pieces"))
 Cormats <- file.path(basewd,"Cormats")
 ```
@@ -257,18 +257,45 @@ sum(is.na(cleandat))
 
 
 Fill in missing values by day time average, then average by day using a three time period window
-```{r}
-meantest <- test %>% mutate_each(funs(rollmean(.,3, align="right")))
+```{r fill in missing}
+cleandata <- readRDS("cleandata.rds")
+dayhourmin <- paste(wday(cleandata$Date.Time),
+                    hour(cleandata$Date.Time),
+                    minute(cleandata$Date.Time),
+                    sep=":")
 
-#find day half hour median for filling NA's
-timemeds <- cleandat %>% mutate(day= day(Date.Time), min = minute(Date.Time), hour = hour(Date.Time)) %>%
-  group_by(day, hour,min) %>%summarise_each(funs(mean(.,na.rm=TRUE))) %>% ungroup
+meanvals <- cleandata[,-1] %>%
+  mutate(time.day = dayhourmin) %>% group_by(time.day) %>%
+  summarise_each(funs(mean(., na.rm=TRUE))) %>%ungroup
+
+navect <- cleandata %>% is.na %>% which(., arr.ind=T)
+
+dayhourmin[navect[,1]]
+
+cleandata2 <-cleandata
+NACols <- unique(navect[,2] )
+
+for(i in 1:length(NACols)){
+colID <-NACols[i]
+rowIDs <- navect[navect[,2]==colID,1]
+
+RowsFromMeanVals<- match(dayhourmin[rowIDs],meanvals$time.day)
+
+cleandata2[rowIDs,colID] <- meanvals[RowsFromMeanVals,colID] %>%unlist
+if((i%%100)==0){print(i)}  
+}
+
+cleandata2 %>% is.na %>% sum
+saveRDS(cleandata2, file="cleandatafilled.rds")
+
+rm(list= c("NACols","dayhourmin", "i","RowsFromMeanVals", "navect", "meanvls", "colID", "rowIDs"))
 
 ```
 
 
 Save each day as a file for making into graphs
 ```{r savedaydata}
+
 datevect <- cleandat$Date.Time %>%as.Date() 
 
 setwd(daytimeseries)
@@ -421,12 +448,25 @@ print(paste("graph", i, "of iteration", n))
 }
 rm(g)
 #find the average number of valid rows
-DataVsER[,-c(1:2)] %>%rowMeans()
+pairtTtest <-bind_rows(data.frame(nodes= DataVsER[,-c(1:2)] %>%
+                       rowMeans(),pair=1:19),
+          nodestats %>% filter(Average=="mean") %>%
+            select(value) %>%rename(nodes=value) %>%
+            mutate(pair=1:19)
+          )
 
+          
 #there is zero std dev on all rows apart from row 18 which has a very small standard deviation
 DataVsER[18,-c(1:2)] %>%sd
 
+
+#perform a paired T-test to see if there is a significant difference in between the number of isolated nodes in an ER graph and the data set.
+t.test(DataVsER[,-c(1:2)] %>%
+                       rowMeans(), (nodestats %>% filter(Average=="mean"))$value, paired = TRUE)
+
+
 #conclusion is that there is a clear and significant different between the number of isolated nodes in the data we are using and an ER graph
+
 
 ```
 
@@ -464,6 +504,7 @@ graph3 <- createcleangraph2(file, file >0.7)
 graph3 <-detectcomms(graph3)
 setwd(SubDataSets)
 write.graph(graph3, "manteng.graphml", format = "graphml")
+#graph3 <- read.graph("manteng.graphml", format = "graphml")
 
 wc <- walktrap.community(graph3)
 fc <- fastgreedy.community(graph3)
@@ -486,6 +527,8 @@ colnames(daydata) <- daydata %>% names %>%make.names()
 
 daydata <- daydata[,-1]%>%t %>% as.data.frame()
   
+x<- daydata[(daydata[,-13])%>% rowSums %>% is.na %>% which,]
+
 clusters <-data.frame(NodeID= get.vertex.attribute(graph3, "name"), 
              ClusterID = get.vertex.attribute(graph3, "ClusterID"))
 
@@ -494,40 +537,37 @@ daydata <- daydata %>% mutate(NodeID = rownames(.)) %>%
   left_join(., clusters, by="NodeID") %>% 
   select(-NodeID) 
 
-daydata2<- daydata %>% group_by(ClusterID) %>% mutate(count=1) %>%
-  summarise_each(funs(sum)) %>% ungroup%>% 
-    gather(.,key=time, value=kwh, -ClusterID, -count) %>%
-  mutate(time= ymd_hms(sub("X","",time)))
+daydata2<- daydata %>% gather(., time, kwh,-ClusterID) %>%
+group_by(ClusterID,time) %>% 
+  summarise_each(funs(sum, n(), mean,median, sd)) %>% ungroup%>% 
+  mutate(time= ymd_hms(sub("X","",time))) %>% filter(n>50)
 
-setwd(Figures)
-daydata2 %>% filter(count>50) %>% ggplot(., aes(x=time, y=kwh, colour= ClusterID)) + geom_line() + 
+daydataunclustered <-daydata %>% gather(., time, kwh,-ClusterID) %>%
+select(-ClusterID) %>% group_by(time) %>% 
+  summarise_each(funs(sum(., na.rm=TRUE), 
+                      n(), mean(., na.rm=TRUE),
+                      median(., na.rm=TRUE), 
+                      sd(., na.rm=TRUE))) %>% ungroup%>% 
+  mutate(time= ymd_hms(sub("X","",time)), ClusterID="Alldata") 
+
+daydata2 <-bind_rows(daydata2, daydataunclustered)
+
+setwd(file.path(Figures,"Method"))
+ggplot(daydata2, aes(x=time, y=sum, colour= ClusterID)) + geom_line() + 
   ggtitle("Sum Cluster Profiles")
 ggsave("singledaypatternSum.pdf")
 
-daydata3<- daydata %>%
-  group_by(ClusterID) %>% mutate(count=n()) %>%
-  summarise_each(funs(mean)) %>% ungroup%>% 
-    gather(.,key=time, value=kwh, -ClusterID, -count) %>%
-  mutate(time= ymd_hms(sub("X","",time)))
-
-
-daydata3%>% filter(count>50) %>% ggplot(., aes(x=time, y=kwh, colour= ClusterID)) + 
-  geom_line() + 
+ggplot(daydata2, aes(x=time, y=mean, colour= ClusterID)) + geom_line() + 
   ggtitle("Mean Cluster Profiles")
 ggsave("singledaypatternMean.pdf")
 
-
-daydata4<- daydata %>%
-  group_by(ClusterID) %>% mutate(count=n()) %>%
-  summarise_each(funs(median)) %>% ungroup%>% 
-    gather(.,key=time, value=kwh, -ClusterID, -count) %>%
-  mutate(time= ymd_hms(sub("X","",time)))
-
-
-daydata4%>% filter(count>50) %>% ggplot(., aes(x=time, y=kwh, colour= ClusterID)) + 
-  geom_line() + 
+ggplot(daydata2, aes(x=time, y=median, colour= ClusterID)) + geom_line() + 
   ggtitle("Median Cluster Profiles")
 ggsave("singledaypatternMedian.pdf")
+
+ggplot(daydata2, aes(x=time, y=sd, colour= ClusterID)) + geom_line() + 
+  ggtitle("Standard deviation of Cluster Profiles")
+ggsave("singledaypatternVar.pdf")
 
 totalnodes <-daydata %>% group_by(ClusterID) %>% summarise(count = n()) %>%
   filter(count>50)
@@ -540,6 +580,35 @@ sum(totalnodes$count)
 
 #there are two different ways of ID'ing clusters. using nodes similarity or using cluster behavioural pattern.
 
+
+x <-daydata %>% 
+  filter(ClusterID=="X12"|ClusterID=="X6"|ClusterID=="X5")%>%
+  mutate(noderef=1:nrow(.))%>%
+  gather(., time, kwh,-ClusterID,-noderef) %>%
+  mutate(time= ymd_hms(sub("X","",time)), 
+         hour=paste(hour(time),
+                    minute(time),
+                    sep=":"))
+
+  ggplot(x, aes(x=kwh, colour=hour)) +geom_density()+
+    facet_grid(ClusterID~.)
+
+    ggplot(x, aes(x=kwh, colour=ClusterID)) +geom_density()
+
+   x %>%
+     ggplot(., aes(x=hour,y=kwh, group=noderef)) +geom_line(alpha=0.05)+
+     facet_grid(ClusterID~.)+ggtitle("Exploration of the load profiles in each cluster")
+   
+   eucdist <-dist(daydata) %>%as.matrix()
+   sum(is.na(eucdist))
+   eucdist2 <-dist(daydata^2)
+   diag(eucdist)<-max(eucdist)
+    eucdist<-as.vector(eucdist)
+   eucdist<-eucdist[(eucdist<1)]
+   dens<-density(eucdist)
+plot(dens)
+
+    
 ```
 
 
