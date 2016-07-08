@@ -36,7 +36,7 @@ Figures <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University College Lo
 functioncode <- file.path(basewd, "Functions")
 SubDataSets <- file.path(basewd, "SubDataSets")
 datafile <- file.path(basewd, "TC1a")
-daytimeseries <-file.path(basewd,"clusterA")
+daytimeseries <-file.path(basewd,"Cleandata")
 #setwd(file.path(basewd,"Power-Networks-LCL-June2015(withAcornGps).csv_Pieces"))
 Cormats <- file.path(basewd,"Cormats")
 ```
@@ -51,7 +51,7 @@ sapply(list.files(), source)
 
 The data is too large to load all at once and perform the filtering operation so the data will be loaded piecewise filtered then all the small pieces will be recombined as searching through the model becomes longer the further down the file it needs to go the file is broken into smaller chunks to keep loading times reasonable.
 
-```{r}
+```{r Load data}
 setwd(datafile)
 smartdata <- fread("TrialMonitoringDataHH.csv", drop = c(2,3))
 saveRDS(smartdata[1:38400000,], "smartdata1.rds")
@@ -80,7 +80,7 @@ saveRDS(smartdata, "filteredset.rds")
 
 
 
-```{r}
+```{r isnaframe}
 smartdata <- dcast(smartdata, Date.Time ~Location.ID, 
               value.var = "Parameter", 
               drop=FALSE)
@@ -103,7 +103,7 @@ saveRDS(ordering, "isnaordering.rds")
 ```
 
 Pre cleaning unordered
-```{r}
+```{r precleaning plot}
 test <- orderedheat(isnaframe, order = "none", merge = 5, simMat = FALSE,
                 xblocks=10, yblocks=10, mid = 0.5, legend="Percent Valid")
 test+     
@@ -119,7 +119,7 @@ rm(test)
 
 
 Pre cleaning ordered
-```{r}
+```{r precleaning ordered}
 test <- bigheat(isnaframe[ordering$Roworder,ordering$Colorder],
                 merge = 5,mid=0.5, legend="Percent Valid")
 test+     
@@ -134,7 +134,7 @@ rm(test)
 
 highlighting smart meter groups i the correct time order. 
 As there are two clear groups of smartmeters and a group of smart meters that have not delivered very good quality information, it is important to look at how the clusters behave in normal time
-```{r}
+```{r extract smartmeters}
 
 
 findbreak<- t(isnaframe[ordering$Roworder, ordering$Colorder[2500:8100]]) %>% as.data.frame %>%
@@ -153,7 +153,7 @@ ggsave("breakpoints.pdf")
 
 
 Lower Cluster in shown in chronological time 
-```{r}
+```{r plot valid meters}
 
 #ensures aggregation happens correctly
 lowerclustID <- 2500:8100 #the smart meters to select
@@ -227,7 +227,6 @@ cleandat <- cleandat[lowertimepercs>0.9, c(TRUE,lowermeterpercs >0.99)]
 ncol(cleandat)*nrow(cleandat)/size #amount of remaingin data
 
 saveRDS(cleandat, "cleandata.rds")
-
 ```
 
 The result of cleaning both the cluster is that only minor smart meter removal specific removal needs to take place after the time periods have been cleaned up. This suggests that within the clusters data quality is strongly related related to time period and not to smart meter.
@@ -268,10 +267,18 @@ timemeds <- cleandat %>% mutate(day= day(Date.Time), min = minute(Date.Time), ho
 
 
 Save each day as a file for making into graphs
-#this chunk got destroyed by mistake and needs to be written again
 ```{r savedaydata}
+datevect <- cleandat$Date.Time %>%as.Date() 
+
 setwd(daytimeseries)
-saveCluster(test)
+for (i in 1:length(datevect)){
+  filter(cleandat, as.Date(Date.Time)==datevect[i]) %>%
+    saveRDS(., paste("date_", datevect[i] ,sep=""))
+   print(i) 
+    
+}
+
+rm(cleandat)
 ```
 
 
@@ -801,7 +808,7 @@ setwd(file.path(Figures,"Method"))
 ```
 
 Plot the nodes existance per day including soup
-```{r}
+```{r ClusterpresencePlot}
 test <-ClusterDay %>%   left_join(., 
             select(ClusterID, ClustID, ClustIDSoup), 
             by="ClustID") %>% select(-ClustID) %>% 
@@ -818,7 +825,7 @@ test3 <-createorder(test2)
 
 
 Create a second transition matrix where all clusters that do not have sufficienct nodevolume are consigned to the soup of "free" nodes
-```{r}
+```{r ClusTransSoup}
 
 ClusTransSoup<- ClusterTransition %>% as.data.frame %>% mutate(ClustID=unlist(ClusterID$ClustIDSoup)) %>%
   group_by(ClustID) %>%
@@ -834,7 +841,7 @@ ClusTransSoup <- ClusTransSoup %>% select(-ClustID) %>% t
 ```
 
 Make a graph of the transition matrix removing the soup node.
-```{r}
+```{r Clustertransgraph}
 clustrans2 <- ClusTransSoup[-1,-1]
 Clustertransgraph = graph.adjacency(clustrans2, 
                           mode = "directed",
@@ -860,7 +867,7 @@ write.graph(Clustertransgraph,
 
 
 Add in MOSAIC class and create some plots and a really terrible predictive model
-```{r}
+```{r Mosaic}
 setwd(datafile)
 Customerdata<-read.csv("CustomerTestCellDefinition.csv") %>% 
   mutate(NodeID =make.names(Location.ID), MosaicNumber = as.factor(Mosaic.Class) %>% as.numeric) %>% 
@@ -889,7 +896,7 @@ test2 <-confusionMatrix(test)$table %>% as.data.frame
 
 
 
-```{r}
+```{r XGBoostmodel}
 NorXGtre <- xgboost(as.matrix(NDM[,1:20]), as.factor(NDM$MosaicNumber), 
                     max.depth=5, 
                     eta=0.10,
