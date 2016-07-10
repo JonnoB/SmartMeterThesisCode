@@ -7,6 +7,7 @@
 
 createorder <-function(df, order="both", simMat= FALSE,xblocks=10, yblocks=10){
   
+  
   print("Creating Corellation")
   #If a similarity matrix has been used there is no need to perform a corellation
   if(simMat==TRUE){
@@ -20,7 +21,8 @@ createorder <-function(df, order="both", simMat= FALSE,xblocks=10, yblocks=10){
                      column = 0)
     
   }
-  
+  #removes NA's as these cause hclust to malfunction  
+  corRow[is.na(corRow)]<-0
   print("Performing Row Clustering")
   #Extract the clustered row order
   Roworder <-switch(order,
@@ -42,6 +44,8 @@ createorder <-function(df, order="both", simMat= FALSE,xblocks=10, yblocks=10){
                        as.data.frame
     )
   }
+  #removes NA's as these cause hclust to malfunction
+  corCoL[is.na(corCol)]<-0
   
   print("Performing Column Clustering")
   Colorder<- switch(order,

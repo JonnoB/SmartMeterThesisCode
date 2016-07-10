@@ -36,7 +36,7 @@ Figures <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University College Lo
 functioncode <- file.path(basewd, "SmartMeterThesisCode","Functions")
 SubDataSets <- file.path(basewd, "SubDataSets")
 datafile <- file.path(basewd, "TC1a")
-daytimeseries <-file.path(basewd,"CleandataNAs")
+daytimeseries <-file.path(basewd,"Cleandata")
 #setwd(file.path(basewd,"Power-Networks-LCL-June2015(withAcornGps).csv_Pieces"))
 Cormats <- file.path(basewd,"Cormats")
 ```
@@ -221,13 +221,13 @@ rm(lowerclust)
 setwd(SubDataSets)
 smartdata <- readRDS("smartdata.rds")
 
-cleandat <-smartdata[,c(1,(1+meterhc$order[lowerclustID]))]
-size <- ncol(cleandat)*nrow(cleandat)
-cleandat <- cleandat[lowertimepercs>0.9, c(TRUE,lowermeterpercs >0.99)]
+cleandata <-smartdata[,c(1,(1+meterhc$order[lowerclustID]))]
+size <- ncol(cleandata)*nrow(cleandata)
+cleandata <- cleandata[lowertimepercs>0.9, c(TRUE,lowermeterpercs >0.99)]
 
-ncol(cleandat)*nrow(cleandat)/size #amount of remaingin data
+ncol(cleandata)*nrow(cleandata)/size #amount of remaingin data
 
-saveRDS(cleandat, "cleandata.rds")
+saveRDS(cleandata, "cleandata.rds")
 ```
 
 The result of cleaning both the cluster is that only minor smart meter removal specific removal needs to take place after the time periods have been cleaned up. This suggests that within the clusters data quality is strongly related related to time period and not to smart meter.
@@ -236,7 +236,7 @@ The result of cleaning both the cluster is that only minor smart meter removal s
 
 How many days are full days?
 ```{r}
-fulldays <- cleandat %>% group_by(date(Date.Time)) %>% summarise(total = n()) %>%
+fulldays <- cleandata %>% group_by(date(Date.Time)) %>% summarise(total = n()) %>%
   rename(Date.Time = `date(Date.Time)`)
 table(fulldays$total)
 
@@ -251,7 +251,7 @@ sum(weekdiff %in% fulldays$Date.Time) #233 days
 weekdiff <- fulldays$Date.Time -ddays(1)
 sum(weekdiff %in% fulldays$Date.Time) #239 days
 
-sum(is.na(cleandat))
+sum(is.na(cleandata))
 ```
 
 
@@ -296,17 +296,17 @@ rm(list= c("NACols","dayhourmin", "i","RowsFromMeanVals", "navect", "meanvls", "
 Save each day as a file for making into graphs
 ```{r savedaydata}
 
-datevect <- cleandat$Date.Time %>%as.Date() 
+datevect <- cleandata$Date.Time %>%as.Date() %>% unique
 
 setwd(daytimeseries)
 for (i in 1:length(datevect)){
-  filter(cleandat, as.Date(Date.Time)==datevect[i]) %>%
+  filter(cleandata, as.Date(Date.Time)==datevect[i]) %>%
     saveRDS(., paste("date_", datevect[i] ,sep=""))
    print(i) 
     
 }
 
-rm(cleandat)
+rm(cleandata)
 ```
 
 
@@ -315,7 +315,7 @@ Create distance matrix for each day
   
 setwd(daytimeseries)
 files <-list.files()
-for (i in 1:length(files)){
+for (i in 33:length(files)){
   setwd(daytimeseries)
   file <- files[i]
   datdat<-readRDS(file) %>%ungroup
@@ -327,8 +327,17 @@ for (i in 1:length(files)){
     setwd(Cormats)  
     saveRDS(weightmat, paste(file,".rds",sep=""))
     print(paste(i,"of",length(files))) 
+    gc()
    }
     
+setwd(Cormats)
+df <- readRDS(list.files()[100])
+df[is.na(df)]<-0
+orderedheat(df, 
+            simMat = TRUE, 
+            legend= "Correlation score", mid=0)+ggtitle("Day 09-8-2011 corellation plot, ordered by similarity") +xlab("nodes")+ylab("nodes")
+setwd(file.path(Figures,"Method"))
+ggsave("day100Corplot.pdf")
     
 ```
 
@@ -447,12 +456,15 @@ print(paste("graph", i, "of iteration", n))
 
 }
 rm(g)
+setwd(SubDataSets)
+saveRDS(DataVsER, "DataVsER.rds")
+
 #find the average number of valid rows
 pairtTtest <-bind_rows(data.frame(nodes= DataVsER[,-c(1:2)] %>%
-                       rowMeans(),pair=1:19),
+                       rowMeans(),cutoff=seq(0.1,1,0.05), type="ER"),
           nodestats %>% filter(Average=="mean") %>%
             select(value) %>%rename(nodes=value) %>%
-            mutate(pair=1:19)
+            mutate(cutoff=seq(0.1,1,0.05), type="Data")
           )
 
           
@@ -467,7 +479,10 @@ t.test(DataVsER[,-c(1:2)] %>%
 
 #conclusion is that there is a clear and significant different between the number of isolated nodes in the data we are using and an ER graph
 
-
+ggplot(pairtTtest, aes(x=cutoff, y=nodes, colour=type)) +geom_line() +
+  ggtitle("Difference betwerr ER and smartmeter non-isolated nodes")
+setwd(file.path(Figures,"Method"))
+ggsave("DataVsER.pdf")
 ```
 
 
@@ -481,10 +496,10 @@ NA's caused an automatic link and so all NA's were replaced with 0's
 setwd(daytimeseries)
 filename <- list.files()[100]#day 100 is the cool ring graph when cut off is .92
 graph <- createweightmat(filename)
-graph2 <-createcleangraph(graph, graph>0.7, 10)
+graph2 <-createcleangraph(graph, graph>0.92, 10)
 graph2 <-detectcomms(graph2)
 setwd(SubDataSets)
-write.graph(graph2, "test3.graphml", format = "graphml")
+write.graph(graph2, "day100-92.graphml", format = "graphml")
 
 get.vertex.attribute(graph2, "ClusterID") %>% unique()
 
@@ -517,8 +532,86 @@ betweengraph3 <- betweenness(graph3)
 ```
 
 
+Make and save all graphs
+```{r makeallgraphs}
+
+#load day make graph save graph file as an graphml
+setwd(Cormats)
+files <-list.files()
+for (i in 1:length(files)){
+  setwd(Cormats)
+  fileid <- readRDS(files[i])
+  graph <- createcleangraph2(fileid, fileid >0.7)
+  print("Graph created")
+  graph <-detectcomms(graph)
+  print("Clusters detected")
+  setwd(file.path(basewd,"behaviourgraphs"))
+  filename <- sub(".rds","",files[i])
+  write.graph(graph, paste(filename ,".graphml",sep=""), format = "graphml")
+  print(paste("Completed",i,"of",length(files))) 
+   }
+
+
+```
+
+
+Create a cluster Makeup vector
+Take the nodes that make up each vector and construct a vector that includes all nodes and ones where a node is included in the cluster
+```{r nodeclustlist}
+
+#Load each graph file and create a list of clust vector matrices
+setwd(file.path(basewd,"behaviourgraphs"))
+
+
+nodeclustlist <-lapply(list.files(), function(n){
+  graph <- read_graph(n, format="graphml")
+  vertices <-data.frame(NodeID= V(graph)$name, 
+                      cluster=
+                        get.vertex.attribute(graph, "ClusterID")) %>%
+                        mutate(yesno=1)%>%
+  spread(., key= cluster, value=yesno) %>% 
+  mutate(NodeID= as.character(NodeID))
+  print(n)
+  vertices
+}
+)
+
+names(nodeclustlist)<-sub(".rds", "",files) %>%sub("date_","",.) %>%ymd
+
+setwd(SubDataSets)
+saveRDS(nodeclustlist, "nodeclustlist.rds")
+#nodeclustlist <- readRDS("nodeclustlist.rds")
+
+#make a dataframe that contains all nodes
+setwd(daytimeseries)
+
+NodeClust<- readRDS(list.files()[1]) %>%names() 
+NodeClust<- NodeClust[-1]
+NodeClust<- data.frame(NodeID=as.character(NodeClust[-1])%>% 
+  make.names) %>%mutate(NodeID = as.character(NodeID))
+
+
+#combine all cluster matrices into a single cluster matrix
+testmat <- Reduce(function(...) merge(..., 
+                                      by="NodeID", 
+                                      all=TRUE), 
+                  nodeclustlist)
+
+NodeClust<-left_join(NodeClust, testmat,key="NodeID")
+
+
+#names(NodeClust)[-1]<-make.names(1:ncol(NodeClust[,-1])) #give them all unique names
+NodeClust[is.na(NodeClust)] <- 0
+setwd(SubDataSets)
+saveRDS(NodeClust, "NodeClust.rds")
+#NodeClust<-readRDS("NodeClust.rds")
+
+```
+
+
 #Comparing load profiles across communities
 ```{r dayloadprofile}
+graph3 <- read.graph("manteng.graphml", format = "graphml")
 setwd(daytimeseries)
 timeseries <- list.files()[100]
 daydata <- readRDS(timeseries) 
@@ -595,106 +688,34 @@ x <-daydata %>%
 
     ggplot(x, aes(x=kwh, colour=ClusterID)) +geom_density()
 
-   x %>%
-     ggplot(., aes(x=hour,y=kwh, group=noderef)) +geom_line(alpha=0.05)+
-     facet_grid(ClusterID~.)+ggtitle("Exploration of the load profiles in each cluster")
-   
-   eucdist <-dist(daydata) %>%as.matrix()
-   sum(is.na(eucdist))
-   eucdist2 <-dist(daydata^2)
-   diag(eucdist)<-max(eucdist)
-    eucdist<-as.vector(eucdist)
-   eucdist<-eucdist[(eucdist<1)]
-   dens<-density(eucdist)
-plot(dens)
-
-    
-```
-
-
-Make and save all graphs
-```{r makeallgraphs}
-
-#load day make graph save graph file as an graphml
-setwd(Cormats)
-files <-list.files()
-for (i in 39:length(files)){
-  setwd(Cormats)
-  fileid <- readRDS(files[i])
-  graph <- createcleangraph2(fileid, fileid >0.7)
-  print("Graph created")
-  graph <-detectcomms(graph)
-  print("Clusters detected")
-  setwd(file.path(basewd,"behaviourgraphs70"))
-  filename <- sub(".rds","",files[i])
-  write.graph(graph, paste(filename ,".graphml",sep=""), format = "graphml")
-  print(paste("Completed",i,"of",length(files))) 
-   }
-
-
-```
-
-
-Create a cluster Makeup vector
-Take the nodes that make up each vector and construct a vector that includes all nodes and ones where a node is included in the cluster
-```{r}
-
-#Load each graph file and create a list of clust vector matrices
-setwd(file.path(basewd,"behaviourgraphs70"))
-
-
-nodeclustlist <-lapply(list.files(), function(n){
-  graph <- read_graph(n, format="graphml")
-  vertices <-data.frame(NodeID= V(graph)$name, 
-                      cluster=
-                        get.vertex.attribute(graph, "ClusterID")) %>%
-                        mutate(yesno=1)%>%
-  spread(., key= cluster, value=yesno) %>% 
-  mutate(NodeID= as.character(NodeID))
-  print(n)
-  vertices
+ggplotColours <- function(n = 6, h = c(0, 360) + 15){
+  if ((diff(h) %% 360) < 1) h[2] <- h[2] - 360/n
+  hcl(h = (seq(h[1], h[2], length = n)), c = 100, l = 65)
 }
-)
 
-names(nodeclustlist)<-sub(".rds", "",files) %>%sub("date_ ","",.) %>%ymd
+ x %>%
+     ggplot(., aes(x=hour,y=kwh, group=noderef,colour=(ClusterID))) +
+     geom_line(alpha=0.2)+
+     facet_grid(ClusterID~.)+
+     ggtitle("Exploration of the load profiles in each cluster") +
+     scale_color_manual(values= ggplotColours(7)[c(3,6,7)], guide=FALSE)
+   ggsave("NodeProfilesInCluster.pdf")
 
-setwd(SubDataSets)
-saveRDS(nodeclustlist, "nodeclustlist.rds")
-#nodeclustlist <- readRDS("nodeclustlist.rds")
-
-#make a dataframe that contains all nodes
-setwd(daytimeseries)
-
-NodeClust<- readRDS(list.files()[1]) %>%names() 
-NodeClust<- NodeClust[-1]
-NodeClust<- data.frame(NodeID=as.character(NodeClust[-1])%>% 
-  make.names) %>%mutate(NodeID = as.character(NodeID))
-
-
-#combine all cluster matrices into a single cluster matrix
-testmat <- Reduce(function(...) merge(..., 
-                                      by="NodeID", 
-                                      all=TRUE), 
-                  nodeclustlist)
-
-NodeClust<-left_join(NodeClust, testmat,key="NodeID")
-
-
-#names(NodeClust)[-1]<-make.names(1:ncol(NodeClust[,-1])) #give them all unique names
-NodeClust[is.na(NodeClust)] <- 0
-setwd(SubDataSets)
-saveRDS(NodeClust, "NodeClust.rds")
-#NodeClust<-readRDS("NodeClust.rds")
-
+   setwd(Cormats)
+   daycor<-readRDS(list.files()[100])
+  rownames(daycor) %>%head(.,20)
+   
 ```
+
+
 
 
 Look at clusters across time periods and create a jaccard similarity matrix.
-```{r}
+```{r Jaccard}
 
 jaccardclust <- jaccard(t(NodeClust[,-1])) %>% as.matrix %>%as.data.frame
 
-bigheat(jaccardclust, order="both", 
+orderedheat(jaccardclust, order="both", 
                    xblocks=1,yblocks = 1, merge=5,
                    simMat = TRUE) +ggtitle("Community Jaccard similarity") + 
   xlab("Communities") + ylab("Communities")
@@ -714,6 +735,7 @@ setwd(SubDataSets)
 write.graph(jaccardclust, "jaccardclust.graphml", format = "graphml")
 saveRDS(jaccardclust,"jaccardclust.rds")
 #jaccardclust <-readRDS("jaccardclust.rds")
+#jaccardclust <-read.graph("jaccardclust.graphml", format = "graphml")
 
 wc<- walktrap.community(jaccardclust)
 modularity(wc)
@@ -757,6 +779,8 @@ ggsave("stabilitydens.pdf")
 
 
 
+
+
 Make a cluster transition matrix
 and plot clusters across all days
 
@@ -797,6 +821,9 @@ ggsave("Clusterrank.pdf")
 Clustsperday<- Clustconversion %>% group_by(date) %>% 
   summarise(totalclusts=n(), significantClusts=sum(NodesInCLuster>50)) %>%
   ungroup
+
+summary(Clustsperday)
+sapply(Clustsperday[,-1], sd)
 
 Clustsperday %>% gather(., Clustertype,number,-date) %>%
   ggplot(., aes(x=date, y= number, colour=Clustertype)) +geom_line()+
@@ -871,8 +898,6 @@ Filter the node cluster data frame so that small clusters are converted into sou
 #turn all the small clusters to soup
 ClusterID %<>% mutate(ClustIDSoup= ifelse(Large,ClustID,"Soup"))
 
-
-match(ClusterID$ClustIDSoup, nodeclust2$ClustID)
 issoup <- ClusterID$ClustIDSoup[match(nodeclust2$ClustID, ClusterID$ClustID)]
 NodeClustSoup<- nodeclust2 %>%mutate(ClustID=issoup) %>% 
   group_by(ClustID) %>% summarise_each(funs(sum)) %>%ungroup
@@ -915,12 +940,10 @@ test <-ClusterDay %>%   left_join(.,
             by="ClustID") %>% select(-ClustID) %>% 
   group_by(ClustIDSoup) %>% summarise_each(funs(sum)) %>%  ungroup
   
-  test2 <- (select(test[-1,-1], -ClustIDSoup)>0)*1#select(test, -ClustIDSoup) #(select(test[-1,], -ClustIDSoup)>0)*1
-  orderedheat((test2), order="none", merge=1) +
+  test2 <- (select(test[-1,], -ClustIDSoup)>0)*1#select(test, -ClustIDSoup) #(select(test[-1,], -ClustIDSoup)>0)*1
+  orderedheat((test2), order="both", merge=1) +
     ggtitle("Cluster Presence with Cluster\n and time Ordered by Similarity")+
     xlab("Time") +ylab("Cluster")
-
-test3 <-createorder(test2)
 
 ```
 
