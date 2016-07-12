@@ -51,7 +51,10 @@ sapply(list.files(), source)
 
 The data is too large to load all at once and perform the filtering operation so the data will be loaded piecewise filtered then all the small pieces will be recombined as searching through the model becomes longer the further down the file it needs to go the file is broken into smaller chunks to keep loading times reasonable.
 
-```{r Load data}
+The data also needs tot be serparatedd into each smart meter type and the time stamps adjusted accordingly. 
+
+
+```{r Load data from csv}
 setwd(datafile)
 smartdata <- fread("TrialMonitoringDataHH.csv", drop = c(2,3))
 saveRDS(smartdata[1:38400000,], "smartdata1.rds")
@@ -59,25 +62,32 @@ saveRDS(smartdata[38400001:76800000,], "smartdata2.rds")
 saveRDS(smartdata[76800001:115200000,], "smartdata3.rds")
 saveRDS(smartdata[115200000:153956821,], "smartdata4.rds")
 rm(smartdata)
+```
+
+Load smart meter type, separate into trilliant and logica, then filter to only include the taimes of interest.
+```{r}
+setwd(datafile)
+datasource <- read.csv("HalfHourlyDataSource.csv")
 
 files<- list.files()
 file.index<- grep(".rds", files)
-
+df1 <- df
+x <- df %>%
+#n <-files[file.index][1]
+#test <- filterTime(df,datasource)
 smartdata<- lapply(files[file.index], function(n){
-  smartdata <- readRDS(n)
-    print("i")
-      names(smartdata)<-  smartdata %>% names %>% make.names
-    smartdata <- smartdata %>% rename(Date.Time = Date.and.Time.of.capture) %>%
-    mutate(Date.Time = dmy_hms(Date.Time), hour = hour(Date.Time)) %>%
-    filter(hour >= 16, hour<=21)
+    df <- readRDS(n)
+    print("Data Loaded")
+  filterTime(df,datasource)
   }
 )
 
 smartdata <- bind_rows(smartdata)
 setwd(SubDataSets)
 saveRDS(smartdata, "filteredset.rds")
-```
 
+
+```
 
 
 ```{r isnaframe}
