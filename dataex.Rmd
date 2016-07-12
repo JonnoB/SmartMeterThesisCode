@@ -6,6 +6,13 @@ output: html_document
 ---
 
 
+includeSyncDropbox("/home/rstudio/Dropbox/Apps/ShareLaTeX/University-College-London-thesis/Figures")
+
+includeSyncDropbox("Apps/ShareLaTeX")
+excludeSyncDropbox("~/Dropbox/Apps/ShareLaTeX/*")
+
+includeSyncDropbox("Thesis Data")
+
 Degreeness of the graphs
 Betweeness
 Life expectancy
@@ -19,7 +26,7 @@ is there a sig lower stdved for clusters compared to un clustered. load profiles
 Look at the sensitivity of the model etc, eg corellation cut off amount of days available,...
 
 ```{r}
-packages <-c("stringr", "lubridate", "data.table","caret", "xgboost", "R.utils", "corrplot", "Hmisc", "Amelia", "Matrix", "ff", "ggdendro", "zoo", "igraph","dplyr", "magrittr", "ggplot2", "tidyr", "xtable")
+packages <-c("stringr", "lubridate", "data.table","caret", "xgboost", "R.utils", "corrplot", "Hmisc", "Amelia", "Matrix", "ff", "ggdendro", "zoo", "igraph","parallel","dplyr", "magrittr", "ggplot2", "tidyr", "xtable")
 
 new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
@@ -27,18 +34,30 @@ if(length(new.packages)) install.packages(new.packages)
 sapply(packages, library, character.only = TRUE)
 rm(list=c("packages",  "new.packages"))
   
+
+isAWS <-(getwd()=="/home/rstudio")
 ```
 
 Project Folders
 ```{r}
-basewd <- "C:/Users/pc1/Documents/Thesis Data"
-Figures <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University College London thesis/Figures")
+#basewd needs to be changed
+if(isAWS){
+  basewd<- "/home/rstudio/Dropbox/Thesis Data"
+  Figures <- "/home/rstudio/Dropbox/Apps/ShareLaTeX/University College London thesis/Figures"
+  Figures <- file.path(basewd, "Figures")
+  options(fftempdir = "/home/rstudio")
+  } else {
+  basewd <- file.path(getwd(), "Thesis Data")
+  Figures <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University College London thesis/Figures")
+}
+
 functioncode <- file.path(basewd, "SmartMeterThesisCode","Functions")
 SubDataSets <- file.path(basewd, "SubDataSets")
-datafile <- file.path(basewd, "TC1a")
+datafile <- file.path(basewd, "TCa1")
 daytimeseries <-file.path(basewd,"Cleandata")
-#setwd(file.path(basewd,"Power-Networks-LCL-June2015(withAcornGps).csv_Pieces"))
-Cormats <- file.path(basewd,"Cormats")
+Cormats <- "/home/rstudio/Cormats"
+  #file.path(basewd,"Cormats")
+
 ```
 
 Source functions
@@ -71,17 +90,23 @@ datasource <- read.csv("HalfHourlyDataSource.csv")
 
 files<- list.files()
 file.index<- grep(".rds", files)
-df1 <- df
-x <- df %>%
-#n <-files[file.index][1]
-#test <- filterTime(df,datasource)
-smartdata<- lapply(files[file.index], function(n){
+
+#Runs in parallel if the code is in aws mode
+if(isAWS){
+ smartdata<- mclapply(files[file.index], function(n){
+    df <- readRDS(n)
+    print("Data Loaded")
+  filterTime(df,datasource)
+  },
+  mc.cores = detectCores())
+}else{
+  smartdata<- lapply(files[file.index], function(n){
     df <- readRDS(n)
     print("Data Loaded")
   filterTime(df,datasource)
   }
 )
-
+}
 smartdata <- bind_rows(smartdata)
 setwd(SubDataSets)
 saveRDS(smartdata, "filteredset.rds")
@@ -91,6 +116,7 @@ saveRDS(smartdata, "filteredset.rds")
 
 
 ```{r isnaframe}
+#data.table is used as it is better with larger table structures, this may stop being relevant with increased integration with dplyr
 smartdata <- dcast(smartdata, Date.Time ~Location.ID, 
               value.var = "Parameter", 
               drop=FALSE)
@@ -108,7 +134,10 @@ rm(smartdata)
 1-sum(isnaframe)/(ncol(isnaframe)*nrow(isnaframe))
 
 #create the row column ordering for isnaframe
-ordering <- createorder(isnaframe, order="both", simMat= FALSE,xblocks=10, yblocks=10)
+#this takes much longer when it has to write to dropbox
+
+ordering <- createorder(isnaframe, order="both", simMat= FALSE,xblocks=5, yblocks=5, par=TRUE)
+
 saveRDS(ordering, "isnaordering.rds")
 ```
 
@@ -147,7 +176,7 @@ As there are two clear groups of smartmeters and a group of smart meters that ha
 ```{r extract smartmeters}
 
 
-findbreak<- t(isnaframe[ordering$Roworder, ordering$Colorder[2500:8100]]) %>% as.data.frame %>%
+findbreak<- t(isnaframe[ordering$Roworder, ordering$Colorder[300:6000]]) %>% as.data.frame %>%
   mutate(rowsum = rowSums(.), 
          diff= lag(rowsum,1), 
          rowID= 1:nrow(.), 
@@ -166,7 +195,7 @@ Lower Cluster in shown in chronological time
 ```{r plot valid meters}
 
 #ensures aggregation happens correctly
-lowerclustID <- 2500:8100 #the smart meters to select
+lowerclustID <- 300:6000 #the smart meters to select
 
 test <- bigheat(isnaframe[,ordering$Colorder[lowerclustID]],
                 merge = 5,mid=0.5, legend="Percent Valid")
@@ -231,7 +260,7 @@ rm(lowerclust)
 setwd(SubDataSets)
 smartdata <- readRDS("smartdata.rds")
 
-cleandata <-smartdata[,c(1,(1+meterhc$order[lowerclustID]))]
+cleandata <-smartdata[,c(1,(1+ordering$Colorder[lowerclustID]))]
 size <- ncol(cleandata)*nrow(cleandata)
 cleandata <- cleandata[lowertimepercs>0.9, c(TRUE,lowermeterpercs >0.99)]
 
@@ -280,9 +309,6 @@ meanvals <- cleandata[,-1] %>%
 
 navect <- cleandata %>% is.na %>% which(., arr.ind=T)
 
-dayhourmin[navect[,1]]
-
-cleandata2 <-cleandata
 NACols <- unique(navect[,2] )
 
 for(i in 1:length(NACols)){
@@ -291,14 +317,14 @@ rowIDs <- navect[navect[,2]==colID,1]
 
 RowsFromMeanVals<- match(dayhourmin[rowIDs],meanvals$time.day)
 
-cleandata2[rowIDs,colID] <- meanvals[RowsFromMeanVals,colID] %>%unlist
+cleandata[rowIDs,colID] <- meanvals[RowsFromMeanVals,colID] %>%unlist
 if((i%%100)==0){print(i)}  
 }
 
-cleandata2 %>% is.na %>% sum
-saveRDS(cleandata2, file="cleandatafilled.rds")
+cleandata %>% is.na %>% sum
+saveRDS(cleandata, file="cleandatafilled.rds")
 
-rm(list= c("NACols","dayhourmin", "i","RowsFromMeanVals", "navect", "meanvls", "colID", "rowIDs"))
+rm(list= c("NACols","dayhourmin", "i","RowsFromMeanVals", "navect", "meanvals", "colID", "rowIDs"))
 
 ```
 
@@ -322,10 +348,30 @@ rm(cleandata)
 
 Create distance matrix for each day
 ```{r distmatday}
-  
+
 setwd(daytimeseries)
 files <-list.files()
-for (i in 33:length(files)){
+if(isAWS){
+
+    mcapply(1:length(files), function(i){
+    setwd(daytimeseries)
+    file <- files[i]
+    datdat<-readRDS(file) %>%ungroup
+    meterIDs <- names(datdat)[-1]
+    print("Data Loaded")
+    weightmat <- datdat[,2:ncol(datdat)] %>% 
+      as.matrix %>% cor
+      diag(weightmat) <- 0
+      setwd(Cormats)  
+      saveRDS(weightmat, paste(file,".rds",sep=""))
+      print(paste(i,"of",length(files))) 
+      gc()
+     }
+  )
+      
+} else {
+
+  for (i in 1:length(files)){
   setwd(daytimeseries)
   file <- files[i]
   datdat<-readRDS(file) %>%ungroup
@@ -339,6 +385,10 @@ for (i in 33:length(files)){
     print(paste(i,"of",length(files))) 
     gc()
    }
+
+    
+}
+  
     
 setwd(Cormats)
 df <- readRDS(list.files()[100])

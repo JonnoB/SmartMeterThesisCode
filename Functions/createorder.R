@@ -5,7 +5,7 @@
 #xblocks/yblocks = the amount of blocks a matrix should be broken into for clustering
 #simMat = a Logical value that is TRUE if df is a symmetrical similarity/distance matrix
 
-createorder <-function(df, order="both", simMat= FALSE,xblocks=10, yblocks=10){
+createorder <-function(df, order="both", simMat= FALSE,xblocks=10, yblocks=10,...){
   
   
   print("Creating Corellation")
@@ -45,7 +45,7 @@ createorder <-function(df, order="both", simMat= FALSE,xblocks=10, yblocks=10){
     )
   }
   #removes NA's as these cause hclust to malfunction
-  corCoL[is.na(corCol)]<-0
+  corCol[is.na(corCol)]<-0
   
   print("Performing Column Clustering")
   Colorder<- switch(order,

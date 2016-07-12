@@ -42,7 +42,7 @@ bigheat <-function(df,merge = 5,mid=0.5, legend="Aggregated score"){
   
   print("Creating Plot")
   
-  ggplot(test, aes(x=columnID, y=rowID, fill = Percentvalid )) +
+  ggplot(test, aes(x=rowID, y= columnID, fill = Percentvalid )) +
     geom_raster() + 
     scale_fill_gradient2(low="blue",mid = "white" ,high = "red", midpoint = mid,
                          name=legend)+
