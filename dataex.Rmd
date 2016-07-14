@@ -709,13 +709,13 @@ Clustconversion <-lapply(1:length(nodeclustlist), function(n){
            IntraDayRank=rank(-(NodesInCLuster),ties.method="random"))
       day
       } 
-    ) %>%bind_rows %>% 
-  mutate(ClustID=
-           get.vertex.attribute(jaccardclust, "ClusterID")
-)
+    ) %>%bind_rows %>% mutate(UniqueID = 1:nrow(.)%>%make.names)
+
+# %>% 
+#   mutate(ClustID=
+#            get.vertex.attribute(jaccardclust, "ClusterID")
+# )
 rm(dayorder)
-
-
 
 ```
 
@@ -900,17 +900,65 @@ write.graph(Clustertransgraph,
 
 ```
 
+```{r Load clustering}
+setwd(daytimeseries)
+dates <- list.files() %>%sub("date_", "",.)
+
+clusterprofile<-lapply(dates[1:10], function(n){
+  daydata <- CreateLoadProfile(n)
+  variable <- "sum"
+  print(n)
+  #the filtering of NA needs to be removed at some point as it will cause problems later on
+  daydata2 <- daydata %>% filter(., !is.na(ClusterID)) %>%
+    select_("ClusterID", "time", variable) %>%
+    spread_(., key="ClusterID", value=variable) %>% 
+    mutate(time= format(x$time, format="%H:%M:%S"))
+  })
+
+clusterprofile <- lapply(1:length(clusterprofile), function(n){
+    dayID <-n
+    print(n)
+    x <-clusterprofile[[dayID]]
+    z <-Clustconversion %>% filter(day==dayID)
+    names(x)[match(z$oldClustID,names(x))]<-z$UniqueID
+    return(x)
+  }
+) %>% Reduce(function(...) merge(..., by='time', 
+                             all.x=TRUE), .)
+
+ClustComms <- cor(clusterprofile[,-1])
+orderedheat(test, merge=1, mid=0, legend = "corellation") + ggtitle("Cluster Corellation using Average Load Profile") +xlab("Cluster") +ylab("Clusters")
+setwd(file.path(Figures,"Method"))
+ggsave("ClusterCorLoad.pdf")
+
+graph <- createcleangraph2(ClustComms, ClustComms >0.7)
+      print("Graph created")
+      graph <-detectcomms(graph)
+      print("Clusters detected")
+
+      setwd(SubDataSets)
+write.graph(graph, "ClustComms.graphml", format="graphml")
+      
+Clustconversion2 <- Clustconversion[1:213] %>% 
+  mutate(ClustID=
+           get.vertex.attribute(graph, "ClusterID")
+)
+
+fc <- fastgreedy.community(graph)
+      wc<-walktrap.community(graph)
+      ic <- infomap.community(graph)
+      modularity(fc)
+      modularity(wc)
+      modularity(ic)
+
+```
+
+
+
 #Comparing load profiles across communities
 ```{r dayloadprofile}
 
 daydata <- CreateLoadProfile("2011-08-09")
-variable <- "sum"
-
-#the filtering of NA needs to be removed at some point as it will cause problems later on
-daydata2 <- daydata %>% filter(., !is.na(ClusterID)) %>%
-  select_("ClusterID", "time", variable) %>%
-  spread_(., key="ClusterID", value=variable)
-
 
 daydata2<- daydata %>% gather(., time, kwh,-ClusterID) %>%
 group_by(ClusterID,time) %>% 
