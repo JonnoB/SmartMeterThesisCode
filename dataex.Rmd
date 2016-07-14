@@ -4,7 +4,8 @@ author: "Jonathan Bourne"
 date: "15 June 2016"
 output: html_document
 ---
-
+includeSyncDropbox("Apps/ShareLaTeX")
+excludeSyncDropbox("/home/rstudio/Dropbox/Apps/ShareLaTeX/*")
 
 includeSyncDropbox("/home/rstudio/Dropbox/Apps/ShareLaTeX/University-College-London-thesis/Figures")
 
@@ -36,26 +37,38 @@ rm(list=c("packages",  "new.packages"))
   
 
 isAWS <-(getwd()=="/home/rstudio")
+# getwd()
+# setwd("/home/rstudio")
+# dir.create("Cormats")
+# dir.create("graphs")
+file.path("/home/rstudio", "Cormats")
+
+file.path("/home/rstudio", "graphs")
 ```
 
 Project Folders
 ```{r}
 #basewd needs to be changed
 if(isAWS){
-  basewd<- "/home/rstudio/Dropbox/Thesis Data"
+  basewd<- "/home/rstudio/Dropbox/Thesis-Data"
   Figures <- "/home/rstudio/Dropbox/Apps/ShareLaTeX/University College London thesis/Figures"
   Figures <- file.path(basewd, "Figures")
-  options(fftempdir = "/home/rstudio")
+  functioncode <- file.path(basewd, "SmartMeterThesisCode","Functions")
+  Cormats <- "/home/rstudio/Cormats"
+GraphPath<-file.path("/home/rstudio", "graphs")
+    options(fftempdir = "/home/rstudio")
   } else {
-  basewd <- file.path(getwd(), "Thesis Data")
+  
+  basewd <- file.path(getwd(), "Thesis-Data")
   Figures <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University College London thesis/Figures")
-}
+  functioncode <- "C:/Users/pc1/Dropbox/Thesis-Data/SmartMeterThesisCode/Functions"
+  Cormats <- "C:/Users/pc1/Dropbox/Thesis-Data/Cormats"
+  }
 
-functioncode <- file.path(basewd, "SmartMeterThesisCode","Functions")
 SubDataSets <- file.path(basewd, "SubDataSets")
 datafile <- file.path(basewd, "TCa1")
 daytimeseries <-file.path(basewd,"Cleandata")
-Cormats <- "/home/rstudio/Cormats"
+
   #file.path(basewd,"Cormats")
 
 ```
@@ -353,7 +366,7 @@ setwd(daytimeseries)
 files <-list.files()
 if(isAWS){
 
-    mcapply(1:length(files), function(i){
+    mclapply(1:length(files), function(i){
     setwd(daytimeseries)
     file <- files[i]
     datdat<-readRDS(file) %>%ungroup
@@ -366,7 +379,7 @@ if(isAWS){
       saveRDS(weightmat, paste(file,".rds",sep=""))
       print(paste(i,"of",length(files))) 
       gc()
-     }
+     },mc.cores =detectCores()
   )
       
 } else {
@@ -389,6 +402,22 @@ if(isAWS){
     
 }
   
+
+setwd(Cormats)
+files <-list.files()
+for (i in 12:length(files)){
+  setwd(Cormats)
+  fileid <- readRDS(files[i])
+  graph <- createcleangraph2(fileid, fileid >0.7)
+  print("Graph created")
+  graph <-detectcomms(graph)
+  print("Clusters detected")
+  setwd(GraphPath)
+  filename <- sub(".rds","",files[i])
+  write.graph(graph, paste(filename ,".graphml",sep=""), format = "graphml")
+  print(paste("Completed",i,"of",length(files))) 
+   }
+
     
 setwd(Cormats)
 df <- readRDS(list.files()[100])
@@ -593,7 +622,7 @@ betweengraph3 <- betweenness(graph3)
 
 
 Make and save all graphs
-```{r makeallgraphs}
+```{r Allgraphs}
 
 #load day make graph save graph file as an graphml
 setwd(Cormats)
@@ -605,7 +634,7 @@ for (i in 1:length(files)){
   print("Graph created")
   graph <-detectcomms(graph)
   print("Clusters detected")
-  setwd(file.path(basewd,"behaviourgraphs"))
+  setwd(GraphPath)
   filename <- sub(".rds","",files[i])
   write.graph(graph, paste(filename ,".graphml",sep=""), format = "graphml")
   print(paste("Completed",i,"of",length(files))) 
@@ -620,7 +649,7 @@ Take the nodes that make up each vector and construct a vector that includes all
 ```{r nodeclustlist}
 
 #Load each graph file and create a list of clust vector matrices
-setwd(file.path(basewd,"behaviourgraphs"))
+setwd(GraphPath)
 
 
 nodeclustlist <-lapply(list.files(), function(n){
