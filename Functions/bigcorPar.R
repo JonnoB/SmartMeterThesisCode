@@ -1,4 +1,7 @@
-bigcor <- function(x, nblocks = 10, verbose = TRUE, par = TRUE, ...)
+#It's questionable weather there is a point to parallelising this, 
+#as if you have enough RAM you don't need bigcor
+
+bigcor <- function(x, nblocks = 10, verbose = TRUE, par = FALSE, ...)
 {
   library(ff, quietly = TRUE)
   NCOL <- ncol(x)

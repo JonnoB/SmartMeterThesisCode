@@ -4,7 +4,11 @@ author: "Jonathan Bourne"
 date: "15 June 2016"
 output: html_document
 ---
-includeSyncDropbox("Apps/ShareLaTeX")
+
+Note inlcuding apps is ok atm but this could explode into a large amount of data depending on what other apps appear, I still haven't worked out selectively inlcuding sub folders
+
+includeSyncDropbox("Apps")
+
 excludeSyncDropbox("/home/rstudio/Dropbox/Apps/ShareLaTeX/*")
 
 includeSyncDropbox("/home/rstudio/Dropbox/Apps/ShareLaTeX/University-College-London-thesis/Figures")
@@ -26,8 +30,8 @@ is there a sig lower stdved for clusters compared to un clustered. load profiles
 
 Look at the sensitivity of the model etc, eg corellation cut off amount of days available,...
 
-```{r}
-packages <-c("stringr", "lubridate", "data.table","caret", "xgboost", "R.utils", "corrplot", "Hmisc", "Amelia", "Matrix", "ff", "ggdendro", "zoo", "igraph","parallel","dplyr", "magrittr", "ggplot2", "tidyr", "xtable")
+```{r Packages}
+packages <-c("stringr", "lubridate", "data.table","caret", "xgboost","e1071", "R.utils", "corrplot", "Hmisc", "Amelia", "Matrix", "ff", "ggdendro", "zoo", "igraph","parallel","dplyr", "magrittr", "ggplot2", "tidyr", "xtable")
 
 new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
@@ -47,20 +51,20 @@ file.path("/home/rstudio", "graphs")
 ```
 
 Project Folders
-```{r}
+```{r Paths}
 #basewd needs to be changed
 if(isAWS){
   basewd<- "/home/rstudio/Dropbox/Thesis-Data"
   Figures <- "/home/rstudio/Dropbox/Apps/ShareLaTeX/University College London thesis/Figures"
-  Figures <- file.path(basewd, "Figures")
-  functioncode <- file.path(basewd, "SmartMeterThesisCode","Functions")
+  Figures <- file.path("/home/rstudio/Dropbox/Apps/ShareLaTeX/University-College-London-thesis/Figures")
+    functioncode <- file.path(basewd, "SmartMeterThesisCode","Functions")
   Cormats <- "/home/rstudio/Cormats"
 GraphPath<-file.path("/home/rstudio", "graphs")
     options(fftempdir = "/home/rstudio")
   } else {
   
   basewd <- file.path(getwd(), "Thesis-Data")
-  Figures <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University College London thesis/Figures")
+  Figures <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University-College-London-thesis/Figures")
   functioncode <- "C:/Users/pc1/Dropbox/Thesis-Data/SmartMeterThesisCode/Functions"
   Cormats <- "C:/Users/pc1/Dropbox/Thesis-Data/Cormats"
   }
@@ -74,7 +78,7 @@ daytimeseries <-file.path(basewd,"Cleandata")
 ```
 
 Source functions
-```{r}
+```{r Functions}
 setwd(functioncode)
 sapply(list.files(), source)
 ```
@@ -97,7 +101,7 @@ rm(smartdata)
 ```
 
 Load smart meter type, separate into trilliant and logica, then filter to only include the taimes of interest.
-```{r}
+```{r Meter Type}
 setwd(datafile)
 datasource <- read.csv("HalfHourlyDataSource.csv")
 
@@ -361,64 +365,11 @@ rm(cleandata)
 
 Create distance matrix for each day
 ```{r distmatday}
+CreateAllCormats(daytimeseries, Cormats, parallel.mode = TRUE)
+CreateAllGraphs(Cormats, GraphPath, 
+                cutoff = 0.7, parallel.mode = TRUE)
 
-setwd(daytimeseries)
-files <-list.files()
-if(isAWS){
-
-    mclapply(1:length(files), function(i){
-    setwd(daytimeseries)
-    file <- files[i]
-    datdat<-readRDS(file) %>%ungroup
-    meterIDs <- names(datdat)[-1]
-    print("Data Loaded")
-    weightmat <- datdat[,2:ncol(datdat)] %>% 
-      as.matrix %>% cor
-      diag(weightmat) <- 0
-      setwd(Cormats)  
-      saveRDS(weightmat, paste(file,".rds",sep=""))
-      print(paste(i,"of",length(files))) 
-      gc()
-     },mc.cores =detectCores()
-  )
-      
-} else {
-
-  for (i in 1:length(files)){
-  setwd(daytimeseries)
-  file <- files[i]
-  datdat<-readRDS(file) %>%ungroup
-  meterIDs <- names(datdat)[-1]
-  print("Data Loaded")
-  weightmat <- datdat[,2:ncol(datdat)] %>% 
-    as.matrix %>% cor
-    diag(weightmat) <- 0
-    setwd(Cormats)  
-    saveRDS(weightmat, paste(file,".rds",sep=""))
-    print(paste(i,"of",length(files))) 
-    gc()
-   }
-
-    
-}
-  
-
-setwd(Cormats)
-files <-list.files()
-for (i in 12:length(files)){
-  setwd(Cormats)
-  fileid <- readRDS(files[i])
-  graph <- createcleangraph2(fileid, fileid >0.7)
-  print("Graph created")
-  graph <-detectcomms(graph)
-  print("Clusters detected")
-  setwd(GraphPath)
-  filename <- sub(".rds","",files[i])
-  write.graph(graph, paste(filename ,".graphml",sep=""), format = "graphml")
-  print(paste("Completed",i,"of",length(files))) 
-   }
-
-    
+#Plot an example corellation matrix
 setwd(Cormats)
 df <- readRDS(list.files()[100])
 df[is.na(df)]<-0
@@ -427,7 +378,7 @@ orderedheat(df,
             legend= "Correlation score", mid=0)+ggtitle("Day 09-8-2011 corellation plot, ordered by similarity") +xlab("nodes")+ylab("nodes")
 setwd(file.path(Figures,"Method"))
 ggsave("day100Corplot.pdf")
-    
+rm(df)
 ```
 
 Look at the number of edges for a large collection of days
@@ -528,6 +479,8 @@ nodestats2 %>% select(cutoff,Average ,value) %>%
 
 ```
 
+The results of the above analysis suggest that a 0.7 cutoff will be chosen.
+
 ```{r ER vs dataset}
 
 #create a dataframe with the number of required edges and the space for the iterations
@@ -595,28 +548,15 @@ get.vertex.attribute(graph2, "ClusterID") %>% unique()
 fc <-fastgreedy.community(graph2)
 wc <-walktrap.community(graph2)
 sc <- spinglass.community(graph2)
-
+ic <- infomap.community(graph2)
 membership(wc) %>% unique 
-```
 
 
-```{r}
-setwd(Cormats)
-filename <- list.files()[100]
-file <- readRDS(filename)
-graph3 <- createcleangraph2(file, file >0.7)
-graph3 <-detectcomms(graph3)
-setwd(SubDataSets)
-write.graph(graph3, "manteng.graphml", format = "graphml")
-#graph3 <- read.graph("manteng.graphml", format = "graphml")
-
-wc <- walktrap.community(graph3)
-fc <- fastgreedy.community(graph3)
+modularity(fc)
 modularity(wc)
-
-
+modularity(ic)
 #Is it worth comparing the structual similarity of the betweenes of the graphs by doing a corellation matrix of the graph betweeness for all graphs?
-betweengraph3 <- betweenness(graph3)
+betweengraph2 <- betweenness(graph2)
 
 ```
 
@@ -625,21 +565,8 @@ Make and save all graphs
 ```{r Allgraphs}
 
 #load day make graph save graph file as an graphml
-setwd(Cormats)
-files <-list.files()
-for (i in 1:length(files)){
-  setwd(Cormats)
-  fileid <- readRDS(files[i])
-  graph <- createcleangraph2(fileid, fileid >0.7)
-  print("Graph created")
-  graph <-detectcomms(graph)
-  print("Clusters detected")
-  setwd(GraphPath)
-  filename <- sub(".rds","",files[i])
-  write.graph(graph, paste(filename ,".graphml",sep=""), format = "graphml")
-  print(paste("Completed",i,"of",length(files))) 
-   }
-
+CreateAllGraphs(Cormats, GraphPath, 
+                cutoff = 0.7, parallel.mode = TRUE)
 
 ```
 
@@ -698,107 +625,6 @@ saveRDS(NodeClust, "NodeClust.rds")
 ```
 
 
-#Comparing load profiles across communities
-```{r dayloadprofile}
-graph3 <- read.graph("manteng.graphml", format = "graphml")
-setwd(daytimeseries)
-timeseries <- list.files()[100]
-daydata <- readRDS(timeseries) 
-rownames(daydata) <- daydata[,1] %>% make.names()
-colnames(daydata) <- daydata %>% names %>%make.names()
-
-daydata <- daydata[,-1]%>%t %>% as.data.frame()
-  
-x<- daydata[(daydata[,-13])%>% rowSums %>% is.na %>% which,]
-
-clusters <-data.frame(NodeID= get.vertex.attribute(graph3, "name"), 
-             ClusterID = get.vertex.attribute(graph3, "ClusterID"))
-
-
-daydata <- daydata %>% mutate(NodeID = rownames(.)) %>%
-  left_join(., clusters, by="NodeID") %>% 
-  select(-NodeID) 
-
-daydata2<- daydata %>% gather(., time, kwh,-ClusterID) %>%
-group_by(ClusterID,time) %>% 
-  summarise_each(funs(sum, n(), mean,median, sd)) %>% ungroup%>% 
-  mutate(time= ymd_hms(sub("X","",time))) %>% filter(n>50)
-
-daydataunclustered <-daydata %>% gather(., time, kwh,-ClusterID) %>%
-select(-ClusterID) %>% group_by(time) %>% 
-  summarise_each(funs(sum(., na.rm=TRUE), 
-                      n(), mean(., na.rm=TRUE),
-                      median(., na.rm=TRUE), 
-                      sd(., na.rm=TRUE))) %>% ungroup%>% 
-  mutate(time= ymd_hms(sub("X","",time)), ClusterID="Alldata") 
-
-daydata2 <-bind_rows(daydata2, daydataunclustered)
-
-setwd(file.path(Figures,"Method"))
-ggplot(daydata2, aes(x=time, y=sum, colour= ClusterID)) + geom_line() + 
-  ggtitle("Sum Cluster Profiles")
-ggsave("singledaypatternSum.pdf")
-
-ggplot(daydata2, aes(x=time, y=mean, colour= ClusterID)) + geom_line() + 
-  ggtitle("Mean Cluster Profiles")
-ggsave("singledaypatternMean.pdf")
-
-ggplot(daydata2, aes(x=time, y=median, colour= ClusterID)) + geom_line() + 
-  ggtitle("Median Cluster Profiles")
-ggsave("singledaypatternMedian.pdf")
-
-ggplot(daydata2, aes(x=time, y=sd, colour= ClusterID)) + geom_line() + 
-  ggtitle("Standard deviation of Cluster Profiles")
-ggsave("singledaypatternVar.pdf")
-
-totalnodes <-daydata %>% group_by(ClusterID) %>% summarise(count = n()) %>%
-  filter(count>50)
-
-xtable(totalnodes) %>% write(., "totalnodes.tex")
-
-xtable(totalnodes) %>% print(., type="latex", file="totalnodes.tex")
-
-sum(totalnodes$count)
-
-#there are two different ways of ID'ing clusters. using nodes similarity or using cluster behavioural pattern.
-
-
-x <-daydata %>% 
-  filter(ClusterID=="X12"|ClusterID=="X6"|ClusterID=="X5")%>%
-  mutate(noderef=1:nrow(.))%>%
-  gather(., time, kwh,-ClusterID,-noderef) %>%
-  mutate(time= ymd_hms(sub("X","",time)), 
-         hour=paste(hour(time),
-                    minute(time),
-                    sep=":"))
-
-  ggplot(x, aes(x=kwh, colour=hour)) +geom_density()+
-    facet_grid(ClusterID~.)
-
-    ggplot(x, aes(x=kwh, colour=ClusterID)) +geom_density()
-
-ggplotColours <- function(n = 6, h = c(0, 360) + 15){
-  if ((diff(h) %% 360) < 1) h[2] <- h[2] - 360/n
-  hcl(h = (seq(h[1], h[2], length = n)), c = 100, l = 65)
-}
-
- x %>%
-     ggplot(., aes(x=hour,y=kwh, group=noderef,colour=(ClusterID))) +
-     geom_line(alpha=0.2)+
-     facet_grid(ClusterID~.)+
-     ggtitle("Exploration of the load profiles in each cluster") +
-     scale_color_manual(values= ggplotColours(7)[c(3,6,7)], guide=FALSE)
-   ggsave("NodeProfilesInCluster.pdf")
-
-   setwd(Cormats)
-   daycor<-readRDS(list.files()[100])
-  rownames(daycor) %>%head(.,20)
-   
-```
-
-
-
-
 Look at clusters across time periods and create a jaccard similarity matrix.
 ```{r Jaccard}
 
@@ -808,7 +634,7 @@ orderedheat(jaccardclust, order="both",
                    xblocks=1,yblocks = 1, merge=5,
                    simMat = TRUE) +ggtitle("Community Jaccard similarity") + 
   xlab("Communities") + ylab("Communities")
-setwd(Figures, "Method")
+setwd(file.path(Figures, "Method"))
 ggsave("jaccardclust.pdf")
 
 jaccardclust <- createcleangraph(jaccardclust,
@@ -822,7 +648,6 @@ jaccardclust <- set.vertex.attribute(jaccardclust,
                                 value = colSums(NodeClust[,-1]))
 setwd(SubDataSets)
 write.graph(jaccardclust, "jaccardclust.graphml", format = "graphml")
-saveRDS(jaccardclust,"jaccardclust.rds")
 #jaccardclust <-readRDS("jaccardclust.rds")
 #jaccardclust <-read.graph("jaccardclust.graphml", format = "graphml")
 
@@ -865,9 +690,6 @@ ggsave("stabilitydens.pdf")
 
 
 ```
-
-
-
 
 
 Make a cluster transition matrix
@@ -929,7 +751,7 @@ ClusterDay <-Clustconversion %>% select(ClustID,day)%>%
 #Plot clusters across time, with clusteres ordered by similarity
   
   #N.B the matrix is trnasposed so it the order of row column is reversed
-  orderedheat(ClusterDay[,-1], order="row", 
+  orderedheat(t(ClusterDay[,-1]), order="column", 
                      xblocks=1,yblocks = 1, merge=1,
                      mid =1, legend="Occurances") +ggtitle("Cluster occurance with ClusterID and Time\n ordered by similarity") +xlab("Time") +ylab("Cluster ID")
 setwd(file.path(Figures,"Method"))
@@ -1078,6 +900,97 @@ write.graph(Clustertransgraph,
 
 ```
 
+#Comparing load profiles across communities
+```{r dayloadprofile}
+
+daydata <- CreateLoadProfile("2011-08-09")
+variable <- "sum"
+
+#the filtering of NA needs to be removed at some point as it will cause problems later on
+daydata2 <- daydata %>% filter(., !is.na(ClusterID)) %>%
+  select_("ClusterID", "time", variable) %>%
+  spread_(., key="ClusterID", value=variable)
+
+
+daydata2<- daydata %>% gather(., time, kwh,-ClusterID) %>%
+group_by(ClusterID,time) %>% 
+  summarise_each(funs(sum, n(), mean,median, sd)) %>% ungroup%>% 
+  mutate(time= ymd_hms(sub("X","",time))) %>% filter(n>50)
+
+daydataunclustered <-daydata %>% gather(., time, kwh,-ClusterID) %>%
+select(-ClusterID) %>% group_by(time) %>% 
+  summarise_each(funs(sum(., na.rm=TRUE), 
+                      n(), mean(., na.rm=TRUE),
+                      median(., na.rm=TRUE), 
+                      sd(., na.rm=TRUE))) %>% ungroup%>% 
+  mutate(time= ymd_hms(sub("X","",time)), ClusterID="Alldata") 
+
+daydata2 <-bind_rows(daydata2, daydataunclustered)
+
+setwd(file.path(Figures,"Method"))
+ggplot(daydata2, aes(x=time, y=sum, colour= ClusterID)) + geom_line() + 
+  ggtitle("Sum Cluster Profiles")
+ggsave("singledaypatternSum.pdf")
+
+ggplot(daydata2, aes(x=time, y=mean, colour= ClusterID)) + geom_line() + 
+  ggtitle("Mean Cluster Profiles")
+ggsave("singledaypatternMean.pdf")
+
+ggplot(daydata2, aes(x=time, y=median, colour= ClusterID)) + geom_line() + 
+  ggtitle("Median Cluster Profiles")
+ggsave("singledaypatternMedian.pdf")
+
+ggplot(daydata2, aes(x=time, y=sd, colour= ClusterID)) + geom_line() + 
+  ggtitle("Standard deviation of Cluster Profiles")
+ggsave("singledaypatternVar.pdf")
+
+totalnodes <-daydata %>% group_by(ClusterID) %>% summarise(count = n()) %>%
+  filter(count>50)
+
+xtable(totalnodes) %>% write(., "totalnodes.tex")
+
+xtable(totalnodes) %>% print(., type="latex", file="totalnodes.tex")
+
+sum(totalnodes$count)
+
+#there are two different ways of ID'ing clusters. using nodes similarity or using cluster behavioural pattern.
+
+
+x <-daydata %>% 
+  filter(ClusterID=="X13"|ClusterID=="X22"|ClusterID=="X6")%>%
+  mutate(noderef=1:nrow(.))%>%
+  gather(., time, kwh,-ClusterID,-noderef) %>%
+  mutate(time= ymd_hms(sub("X","",time)), 
+         hour=paste(hour(time),
+                    minute(time),
+                    sep=":"))
+
+  ggplot(x, aes(x=kwh, colour=hour)) +geom_density()+
+    facet_grid(ClusterID~.)
+
+    ggplot(x, aes(x=kwh, colour=ClusterID)) +geom_density()
+
+ggplotColours <- function(n = 6, h = c(0, 360) + 15){
+  if ((diff(h) %% 360) < 1) h[2] <- h[2] - 360/n
+  hcl(h = (seq(h[1], h[2], length = n)), c = 100, l = 65)
+}
+
+ x %>%
+     ggplot(., aes(x=hour,y=kwh, group=noderef,colour=(ClusterID))) +
+     geom_line(alpha=0.2)+
+     facet_grid(ClusterID~.)+
+     ggtitle("Exploration of the load profiles in each cluster") +
+     scale_color_manual(values= ggplotColours(7)[c(3,6,7)], guide=FALSE)
+   ggsave("NodeProfilesInCluster.pdf")
+
+   setwd(Cormats)
+   daycor<-readRDS(list.files()[100])
+  rownames(daycor) %>%head(.,20)
+   
+```
+
+
+
 
 Add in MOSAIC class and create some plots and a really terrible predictive model
 ```{r Mosaic}
@@ -1101,14 +1014,10 @@ NDM <-NodeDistrib %>% mutate(NodeID = rownames(.)) %>%
   left_join(., select(Customerdata, Mosaic.Class,MosaicNumber, NodeID), by="NodeID")%>%
   select(-NodeID) 
 
-test <- train(x=NDM[,1:20], y=as.factor(NDM[,21]), method="xgbTree" )
-
-test2 <-confusionMatrix(test)$table %>% as.data.frame
-
 ```
 
 
-
+#rubbish Xgboost model detecting class.
 ```{r XGBoostmodel}
 NorXGtre <- xgboost(as.matrix(NDM[,1:20]), as.factor(NDM$MosaicNumber), 
                     max.depth=5, 
@@ -1125,6 +1034,9 @@ XGconf <- confusionMatrix(XGpreds, (NDM$MosaicNumber))
 test <- XGconf$table %>% data.frame() %>% spread(., key=Reference, value=Freq)
 
 Customerdata %>% group_by(MosaicNumber) %>%summarise(Mosaic.Class=first(Mosaic.Class))
+
+#is there anything useful here
+orderedheat(test[,-1]/rowSums(test[,-1]), merge=1)
 
 ```
 
