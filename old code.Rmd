@@ -51,4 +51,37 @@ smartdata <- lapply(list.files(), readRDS) %>% bind_rows(.)
 
 ```
 
+#jaccard data removed as it didnt really work and was replaced with a behaviour based method
+```{r}
+
+jaccardclust <- jaccard(t(NodeClust[,-1])) %>% as.matrix %>%as.data.frame
+
+orderedheat(jaccardclust, order="both", 
+                   xblocks=1,yblocks = 1, merge=5,
+                   simMat = TRUE) +ggtitle("Community Jaccard similarity") + 
+  xlab("Communities") + ylab("Communities")
+setwd(file.path(Figures, "Method"))
+ggsave("jaccardclust.pdf")
+
+jaccardclust <- createcleangraph(jaccardclust,
+                                 jaccardclust>0.99, 
+                                 mincons = 0,
+                                 sweep=FALSE)
+ecount(jaccardclust)
+jaccardclust <- detectcomms(jaccardclust)
+jaccardclust <- set.vertex.attribute(jaccardclust, 
+                                name = "size", index = V(jaccardclust), 
+                                value = colSums(NodeClust[,-1]))
+setwd(SubDataSets)
+write.graph(jaccardclust, "jaccardclust.graphml", format = "graphml")
+#jaccardclust <-readRDS("jaccardclust.rds")
+#jaccardclust <-read.graph("jaccardclust.graphml", format = "graphml")
+
+wc<- walktrap.community(jaccardclust)
+modularity(wc)
+
+jaccardIDs <- data.frame(ClusterID =get.vertex.attribute(jaccardclust, "ClusterID") ) %>% group_by(ClusterID) %>% summarise(counts = n())
+
+```
+
 
