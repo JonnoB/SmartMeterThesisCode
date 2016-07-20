@@ -8,6 +8,8 @@ createcleangraph2 <- function(cormat, edgemat, sweep =TRUE){
   hasedges <- rowSums(edgemat,na.rm=TRUE) > 0
   weightmat <- weightmat*edgemat
   
+  #Sweep: Sweeps away loose nodes, and so makes plotting 
+  #easier preventing the halo that can occur with many loose nodes
   weightmat<- if (sweep) {
     weightmat[hasedges,hasedges]
   } else {

@@ -1,0 +1,50 @@
+---
+title: "Untitled"
+author: "Jonathan Bourne"
+date: "16 July 2016"
+output: html_document
+---
+
+
+
+```{r}
+## Visualization of cluster similarity
+# Load dataframe: features ordered by cluster ID, less cluster ID
+test = cldf_df2 %>% filter(!duplicated(Customer.company))
+test <- test[,c(8,9,10,12)] %>% arrange(Cluster) %>% select(-Cluster)
+
+# Create cluster cutoffs vector
+clustvect = rep(6)
+for (i in 1:6){
+clustvect[i] = NROW(test[test$Cluster == i,])
+}
+
+# Create cluster ticks vector
+clustvect <-c(0,cumsum(clustvect))
+labelvect = rep(6)
+for (i in 1:7){
+ if (i!=1){
+ labelvect[i] = (clustvect[i] - clustvect[i-1])/2 + clustvect[i-1]
+ }
+ else{
+ labelvect[i] = clustvect[i]/2
+ }
+}
+
+# Create distance matrix
+g <- as.matrix(dist(test))
+
+# Creat heat map of cluster distance
+clus_heat = bigheat(g,mid = 3, legend = "Distance") 
+clus_heat+ 
+ geom_hline(yintercept = (clustvect/5)) + 
+ geom_vline(xintercept = (clustvect/5)) + 
+ labs(title = "Cluster Differentiation ", 
+      x = "Customer Condensed Similarity Vectors", 
+      y = "Customer Condensed Similarity Vectors") +
+ scale_x_continuous(breaks = (labelvect/5)[-1], 
+                    labels = c("C1","C2","C3","C4","C5","C6")) + 
+ scale_y_continuous(breaks = (labelvect/5)[-1], 
+                    labels = c("C1","C2","C3","C4","C5","C6"))
+```
+
