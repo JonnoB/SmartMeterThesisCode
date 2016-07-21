@@ -6,11 +6,12 @@
 #dependent packages
 #dplyr, parallel, igraph
 
-CreateAllGraphs <- function(SourceFolder, TargetFolder,cutoff=0.7 , parallel.mode= FALSE ){
+CreateAllGraphs <- function(SourceFolder, TargetFolder,cutoff=0.7 , parallel.mode= FALSE, files=NA ){
 
   #Find all source files
   setwd(SourceFolder)
-  files <-list.files()
+  if(is.na(files)) {
+    files <-list.files()}
   
   if(parallel.mode){
     
@@ -18,6 +19,8 @@ CreateAllGraphs <- function(SourceFolder, TargetFolder,cutoff=0.7 , parallel.mod
       
       setwd(SourceFolder)
       fileid <- readRDS(files[i])
+      #The Na's are removed here as otherwise there are links all over the place due to the missing 2 nodes
+      fileid[is.na(fileid)] <- 0
       graph <- createcleangraph2(fileid, fileid >0.7)
       print("Graph created")
       graph <-detectcomms(graph)
@@ -33,8 +36,11 @@ CreateAllGraphs <- function(SourceFolder, TargetFolder,cutoff=0.7 , parallel.mod
   } else {
     
     for (i in 1:length(files)){
+      print(i)
       setwd(SourceFolder)
       fileid <- readRDS(files[i])
+      #The Na's are removed here as otherwise there are links all over the place due to the missing 2 nodes
+      fileid[is.na(fileid)] <- 0
       graph <- createcleangraph2(fileid, fileid >0.7)
       print("Graph created")
       graph <-detectcomms(graph)

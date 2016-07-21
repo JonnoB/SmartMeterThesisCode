@@ -20,6 +20,7 @@ CreateAllCormats <- function(SourceFolder, TargetFolder, parallel.mode= FALSE ){
       weightmat <- datdat[,2:ncol(datdat)] %>% 
         as.matrix %>% cor
       diag(weightmat) <- 0
+      
       setwd(TargetFolder)  
       saveRDS(weightmat, paste(file,".rds",sep=""))
       print(paste(i,"of",length(files))) 

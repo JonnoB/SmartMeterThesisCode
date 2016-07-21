@@ -1,8 +1,9 @@
-createcleangraph2 <- function(cormat, edgemat, sweep =TRUE){
-  
+createcleangraph2 <- function(cormat, edgemat, sweep =FALSE){
+
   weightmat <- sqrt(2*(1-cormat))
   diag(weightmat) <- 0 #removes the diagonal this isn't necessary as it will actually be done in the graph stage
-  weightmat[is.na(weightmat)] <- 0 #removes NA's to prevent automatic edge creation
+  #not Necessary as edge create is done by the edgemat!
+  #weightmat[is.na(weightmat)] <- 0 #removes NA's to prevent automatic edge creation
   vertexIDs <-cormat %>% colnames %>% make.names
 
   hasedges <- rowSums(edgemat,na.rm=TRUE) > 0

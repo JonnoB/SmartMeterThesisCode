@@ -552,20 +552,22 @@ NA's caused an automatic link and so all NA's were replaced with 0's
 ```{r singlegraph}
 
 setwd(daytimeseries)
-filename <- list.files()[100]#day 100 is the cool ring graph when cut off is .92
+filename <- list.files()[101]#day 100 is the cool ring graph when cut off is .92
 graph <- createweightmat(filename)
-graph2 <-createcleangraph(graph, graph>0.92, 10)
+graph2 <-createcleangraph2(graph, graph>0.7 )
 graph2 <-detectcomms(graph2)
 setwd(SubDataSets)
 write.graph(graph2, "day100-92.graphml", format = "graphml")
 
-get.vertex.attribute(graph2, "ClusterID") %>% unique()
+get.vertex.attribute(graph2, "ClusterID", index=V(graph2)) %>% unique()
 
 fc <-fastgreedy.community(graph2)
 wc <-walktrap.community(graph2)
 sc <- spinglass.community(graph2)
 ic <- infomap.community(graph2)
 membership(wc) %>% unique 
+membership(fc) %>% unique 
+membership(ic) %>% unique 
 
 
 modularity(fc)
@@ -595,7 +597,7 @@ nodecount <-sapply(files, function(n){
   }
 )
 
-#there appears to be 5258 nodes in every day when sweep is used for graph creation
+#there appears to be 5258 nodes in every day when sweep is used for graph creation. When sweep is off then there are 5260
 summary(nodecount)
 ```
 
@@ -607,8 +609,37 @@ Take the nodes that make up each vector and construct a vector that includes all
 #Load each graph file and create a list of clust vector matrices
 setwd(GraphPath)
 files <- list.files()
+#n<-files[96]
 
-nodeclustlist <-lapply(files, function(n){
+
+
+#why have some graphs not clustered?
+test2 <- mclapply(files, function(n){
+  print(n)
+  graph <- read_graph(n, format="graphml")
+  graph %>% get.vertex.attribute(., "ClusterID") %>%unique %>%length
+  }, mc.cores= detectCores()
+  ) %>% unlist
+
+
+test2==test
+setwd(Cormats)
+list.files()[test==5260] %>% 
+CreateAllGraphs(Cormats, GraphPath, parallel.mode = FALSE, files=.)
+
+setwd(Cormats)
+graph <-readRDS(list.files()[100])
+sum(is.na(graph))
+graph[is.na(graph)] <- 0
+graph2 <-createcleangraph2(graph, graph>0.7 )
+graph2 <-detectcomms(graph2)
+get.vertex.attribute(graph2, "ClusterID", index=V(graph2)) %>% unique()
+
+
+
+
+
+nodeclustlist <-mclapply(files, function(n){
   graph <- read_graph(n, format="graphml")
   vertices <-data.frame(NodeID= V(graph)$name, 
                       cluster=
@@ -618,7 +649,7 @@ nodeclustlist <-lapply(files, function(n){
   mutate(NodeID= as.character(NodeID))
   print(n)
   vertices
-}
+}, mc.cores= detectCores()
 )
 
 names(nodeclustlist)<-sub(".rds", "",files) %>%sub("date_","",.) %>%ymd
@@ -665,7 +696,7 @@ dayorder <- names(nodeclustlist)%>%ymd
 
 Clustconversion <-lapply(1:length(nodeclustlist), function(n){
       day <-data.frame(oldClustID=nodeclustlist[[n]][,-1] %>%
-                   names %>% as.character) %>%
+                   names %>% as.character, stringsAsFactors = FALSE) %>%
     mutate(day=n, date=dayorder[n],
            NodesInCLuster=colSums(nodeclustlist[[n]][,-1], na.rm=TRUE),
            IntraDayRank=rank(-(NodesInCLuster),ties.method="random"))
@@ -693,6 +724,7 @@ clusterprofile<-mclapply(dates, function(n){
     select_("ClusterID", "time", variable) %>%
     spread_(., key="ClusterID", value=variable) %>% 
     mutate(time= format(.$time, format="%H:%M:%S"))
+  return(daydata2)
   }, mc.cores = detectCores())
 
 
@@ -931,7 +963,7 @@ clustdaycount <- Clustconversion %>% group_by(day) %>%
 Clusttrans <- matrix(0, ncol= max(clustdaycount), 
                    nrow= max(clustdaycount))
 for(n in 1:(nrow(clustdaycount)-1)){
-        print(n)
+        #print(n)
     Clusttrans[clustdaycount[[n,4]]:clustdaycount[[n,5]],clustdaycount[[n+1,4]]:clustdaycount[[n+1,5]]] <-
       Nodetrans[clustdaycount[[n,4]]:clustdaycount[[n,5]],clustdaycount[[n+1,4]]:clustdaycount[[n+1,5]]]
     }
