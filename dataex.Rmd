@@ -31,7 +31,7 @@ is there a sig lower stdved for clusters compared to un clustered. load profiles
 Look at the sensitivity of the model etc, eg corellation cut off amount of days available,...
 
 ```{r Packages}
-packages <-c("stringr", "lubridate", "data.table","caret", "xgboost","e1071", "R.utils", "corrplot", "Hmisc", "Amelia", "Matrix", "ff", "ggdendro", "zoo", "igraph","parallel","dplyr", "magrittr", "ggplot2", "tidyr", "xtable")
+packages <-c("plyr","stringr", "lubridate", "data.table","caret", "xgboost","e1071", "R.utils", "corrplot", "Hmisc", "Amelia", "Matrix", "ff", "ggdendro", "zoo", "networkD3", "igraph","parallel", "magrittr", "ggplot2", "tidyr", "xtable","dplyr")
 
 new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
@@ -63,7 +63,7 @@ GraphPath<-file.path("/home/rstudio", "graphs")
     options(fftempdir = "/home/rstudio")
   } else {
   
-  basewd <- file.path(getwd(), "Thesis-Data")
+  basewd <- "C:/Users/pc1/Dropbox/Thesis-Data"
   Figures <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University-College-London-thesis/Figures")
   functioncode <- "C:/Users/pc1/Dropbox/Thesis-Data/SmartMeterThesisCode/Functions"
   Cormats <- "C:/Users/pc1/Dropbox/Thesis-Data/Cormats"
@@ -945,14 +945,16 @@ NodeClust<-readRDS("NodeClust.rds")
 Clustconversion <- readRDS("Clustconversion.rds")
 #names(NodeClust)[-1] <- Clustconversion$UniqueID
 
+clustdaycount <- Clustconversion %>% group_by(day) %>%
+  summarise(counts= n()) %>% ungroup %>% 
+  mutate(cumsum = cumsum(counts), startrow= cumsum(c(1,counts))[-(nrow(.)+1)], endrow = cumsum)
+
+
 names(NodeClust)[-1]<- Clustconversion$UniqueID
 Nodetrans <- NodeClust %>% select(-NodeID)
 
 Nodetrans <- t(Nodetrans) %*% as.matrix(Nodetrans)
 
-clustdaycount <- Clustconversion %>% group_by(day) %>%
-  summarise(counts= n()) %>% ungroup %>% 
-  mutate(cumsum = cumsum(counts), startrow= cumsum(c(1,counts))[-(nrow(.)+1)], endrow = cumsum)
 
 #seperate each day into clusters then superimpose them onto each other with zeros where each day isn't this means that only the interaction between consectutive days is used and nothing else.
 
@@ -964,6 +966,8 @@ for(n in 1:(nrow(clustdaycount)-1)){
       Nodetrans[clustdaycount[[n,4]]:clustdaycount[[n,5]],clustdaycount[[n+1,4]]:clustdaycount[[n+1,5]]]
     }
 
+setwd(SubDataSets)
+saveRDS(Clusttrans, "SankeyFrame.rds")
 
 
 Clusttrans <- Clusttrans %>% as.data.frame %>% 
@@ -975,61 +979,33 @@ Clusttrans <- Clusttrans %>% t %>%
   group_by(ClustID) %>%
   summarise_each(funs(sum)) %>% ungroup 
 
-test<- Clusttrans %>% as.data.frame %>% filter(ClustID =="X9")
-
-test[,colSums(select(test,-ClustID))>0]
-
-Clustconversion %>% filter(ClustID=="X9")
-Clustconversion %>% filter(UniqueID=="X9")
-#Clustconversion %>% filter(oldClustID=="X9") #super long
-(NodeClust[,-1] %>% colSums)[c(4293,6066)] #clearly not clusters x9
-
-((NodeClust[,-1] %>% colSums)==357) %>% sum
-
-rowSums(Clusttrans[,-1])
-
-colSums(Clusttrans[,-1])
-
-test180 <-nodeclustlist[[180]] #correct for 180
-colSums(test180[,-1], na.rm=T)
-
-test2011_10_28 <- nodeclustlist$`2011-10-28`  #this is the correct day for day 180
-colSums(test2011_10_28[,-1], na.rm=T)
-
-which(names(nodeclustlist)=="2011-10-28")
-nodeclustlist[180] %>%names
-
-test <- NodeClust[,-1] %>%colSums() 
-which(test==314)
 ```
 
 
 Find the counts of nodes transfering from one cluster to another across each turn by finding the the turnwise A*B matrix for the clusters in adjacent turns, add the results of that matrix multiplication to a matrix that contains all clusters
 ```{r Tansition counts}
-
-
-totalclusts <- unique(Clustconversion$ClustID) %>% length
-ClusterTransition<- matrix(data=0, nrow= totalclusts,
-                           ncol=totalclusts,
-                           dimnames = list(unique(Clustconversion$ClustID),                                           unique(Clustconversion$ClustID)))
-
-for(i in 2:max(Clustconversion$day)){
-dayx1 <-NodeClust[,-1][,(Clustconversion$day==(i-1))]
-dayx2 <-NodeClust[,-1][,(Clustconversion$day==i)]
-
-z <- t(dayx2) %*% as.matrix(dayx1) 
-colnames(z) <- Clustconversion$ClustID[Clustconversion$day==(i-1)]
-rownames(z) <- Clustconversion$ClustID[Clustconversion$day==i]
-
-mcol<-match(colnames(z),colnames(ClusterTransition))
-mrow<-match(rownames(z),rownames(ClusterTransition))
-
-ClusterTransition[mrow, mcol] <-ClusterTransition[mrow, mcol]+z
-print(i)
-}
-#removes all objects created by the for loop, also removes the vector itself for lols.
-remove<-c("dayx1", "dayx2","z","mcol","mrow", "remove")
-rm(list=remove)
+# totalclusts <- unique(Clustconversion$ClustID) %>% length
+# ClusterTransition<- matrix(data=0, nrow= totalclusts,
+#                            ncol=totalclusts,
+#                            dimnames = list(unique(Clustconversion$ClustID),                                           unique(Clustconversion$ClustID)))
+# 
+# for(i in 2:max(Clustconversion$day)){
+# dayx1 <-NodeClust[,-1][,(Clustconversion$day==(i-1))]
+# dayx2 <-NodeClust[,-1][,(Clustconversion$day==i)]
+# 
+# z <- t(dayx2) %*% as.matrix(dayx1) 
+# colnames(z) <- Clustconversion$ClustID[Clustconversion$day==(i-1)]
+# rownames(z) <- Clustconversion$ClustID[Clustconversion$day==i]
+# 
+# mcol<-match(colnames(z),colnames(ClusterTransition))
+# mrow<-match(rownames(z),rownames(ClusterTransition))
+# 
+# ClusterTransition[mrow, mcol] <-ClusterTransition[mrow, mcol]+z
+# print(i)
+# }
+# #removes all objects created by the for loop, also removes the vector itself for lols.
+# remove<-c("dayx1", "dayx2","z","mcol","mrow", "remove")
+# rm(list=remove)
 
 #How many times does each cluster occurr?
 ClusterID <-Clustconversion %>% group_by(ClustID) %>% summarise(counts = n(), first=first(day))
@@ -1050,9 +1026,12 @@ percVolume[Large] %>%sum
 Filter the node cluster data frame so that small clusters are converted into soup
 ```{r ConvertToSoup}
 #turn all the small clusters to soup
-ClusterID %<>% mutate(ClustIDSoup= ifelse(Large,ClustID,"soup"))
+ClusterID %>% mutate(ClustIDSoup= ifelse(Large,ClustID,"soup"))
+
 
 issoup <- ClusterID$ClustIDSoup[match(Clustconversion$ClustID, ClusterID$ClustID)]
+Clustconversion$ClustID <- issoup 
+
 NodeClustSoup<- NodeClust[,-1] %>%t %>% as.data.frame %>%
   mutate(ClustID=Clustconversion$ClustID) %>% 
   group_by(ClustID) %>% summarise_each(funs(sum)) %>%ungroup
@@ -1095,26 +1074,44 @@ test <-Clustsperday %>%   left_join(.,
 
 ```
 
+create sankey plot, alluvial diagram
+```{r Sankey}
+setwd(SubDataSets)
+SankeyFrame<-readRDS("SankeyFrame.rds") %>% as.data.frame
+Clustconversion <- readRDS("Clustconversion.rds")
+
+test <- Clustconversion %>%group_by(day, date) %>%
+summarise(counts=n()) %>% 
+mutate(daynum = weekdays(day)) %>%
+filter(day>95, day<110)
+
+rm(test)
+
+
+SankeyData(50:56,SankeyFrame, Clustconversion)
+
+```
+
 
 Create a second transition matrix where all clusters that do not have sufficienct nodevolume are consigned to the soup of "free" nodes
-```{r ClusTransSoup}
+```{r Clusttrans}
 
-ClusTransSoup<- Clusttrans %>% as.data.frame %>% mutate(ClustID=unlist(ClusterID$ClustIDSoup)) %>%
+Clusttrans<- Clusttrans %>% as.data.frame %>% mutate(ClustID=unlist(ClusterID$ClustIDSoup)) %>%
   group_by(ClustID) %>%
   summarise_each(funs(sum)) %>% ungroup
-rownames(ClusTransSoup)<- ClusTransSoup$ClustID
-ClusTransSoup <- ClusTransSoup %>% select(-ClustID) %>% t %>%
+rownames(Clusttrans)<- Clusttrans$ClustID
+Clusttrans <- Clusttrans %>% select(-ClustID) %>% t %>%
   as.data.frame %>% mutate(ClustID=unlist(ClusterID$ClustIDSoup)) %>%
   group_by(ClustID) %>%
   summarise_each(funs(sum)) %>% ungroup
-rownames(ClusTransSoup)<- ClusTransSoup$ClustID
-ClusTransSoup <- ClusTransSoup %>% select(-ClustID) %>% t
+rownames(Clusttrans)<- Clusttrans$ClustID
+Clusttrans <- Clusttrans %>% select(-ClustID) %>% t
 
 ```
 
 Make a graph of the transition matrix removing the soup node.
 ```{r Clustertransgraph}
-clustrans2 <- ClusTransSoup[-1,-1]
+clustrans2 <- Clusttrans/rowSums(Clusttrans) #Clusttrans[-1,-1]
 Clustertransgraph = graph.adjacency(clustrans2, 
                           mode = "directed",
                           weighted = TRUE, diag = TRUE)
@@ -1124,9 +1121,9 @@ Clustertransgraph<- set.vertex.attribute(Clustertransgraph,
                                          "size",
                      index = V(Clustertransgraph),
                      value=
-                       rowSums(ClusTransSoup)*50/max(rowSums(ClusTransSoup)))
+                       rowSums(Clusttrans)*50/max(rowSums(Clusttrans)))
 
-get.edge.attribute(Clustertransgraph,"weight")
+
 get.vertex.attribute(Clustertransgraph,"size")
 setwd(SubDataSets)
 write.graph(Clustertransgraph, 
@@ -1201,11 +1198,6 @@ x <-daydata %>%
     facet_grid(ClusterID~.)
 
     ggplot(x, aes(x=kwh, colour=ClusterID)) +geom_density()
-
-ggplotColours <- function(n = 6, h = c(0, 360) + 15){
-  if ((diff(h) %% 360) < 1) h[2] <- h[2] - 360/n
-  hcl(h = (seq(h[1], h[2], length = n)), c = 100, l = 65)
-}
 
  x %>%
      ggplot(., aes(x=hour,y=kwh, group=noderef,colour=(ClusterID))) +
