@@ -12,7 +12,8 @@
 # and the Cluster ID groups.
 #
 #Requires: dplyr
-SankeyData <- function(period,SankeyFrame,ClusterConversion, simple=TRUE){
+SankeyData <- function(period,SankeyFrame,ClusterConversion, 
+                       simple=TRUE, SOUP=TRUE){
 
 #subtracts the last element of period so that the correct total
   #is returned
@@ -42,6 +43,10 @@ x <-x %>%   gather(.,key= target, value=Nodes, -ClustID) %>%
 return(x)
 }) %>%bind_rows()
 
+if(SOUP==FALSE){
+  Sankey2 %<>%filter(!grepl("soup",.$source),
+                    !grepl("soup",.$target))
+}
 
 #reshape to create a list of unique Cluster Names and their 
 #Cluster ID to colour the groups by
@@ -59,9 +64,10 @@ Sankey2 <- Sankey2%>%
          target=match(Sankey2$target, SankeyNodes$UniqueID)-1) %>% 
   as.data.frame
 
-Xvect<- unique(SankeyNodes$ClustID)
+Xvect<- unique(Clustconversion$ClustID)
 
-SankeyColours <-ggplotColours(length(Xvect)) %>%toString() %>%gsub('#','"#',.) %>%gsub(',','",',.) %>%paste('d3.scale.ordinal()
+SankeyColours <-ggplotColours(length(Xvect)) %>%toString() %>%
+gsub('#','"#',.) %>%gsub(',','",',.) %>%paste('d3.scale.ordinal()
         .domain([',paste('"',Xvect,'"', sep="")%>%toString()  ,'])
         .range([',. ,'\"]);', sep ="")
 

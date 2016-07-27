@@ -31,7 +31,7 @@ is there a sig lower stdved for clusters compared to un clustered. load profiles
 Look at the sensitivity of the model etc, eg corellation cut off amount of days available,...
 
 ```{r Packages}
-packages <-c("plyr","stringr", "lubridate", "data.table","caret", "xgboost","e1071", "R.utils", "corrplot", "Hmisc", "Amelia", "Matrix", "ff", "ggdendro", "zoo", "networkD3", "igraph","parallel", "magrittr", "ggplot2", "tidyr", "xtable","dplyr")
+packages <-c("stringr", "lubridate", "data.table","caret", "xgboost","e1071", "R.utils", "corrplot", "Hmisc", "Amelia", "Matrix", "ff", "ggdendro", "zoo", "networkD3", "igraph","parallel", "magrittr", "ggplot2", "tidyr", "xtable","dplyr")
 
 new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
@@ -314,7 +314,19 @@ sum(is.na(cleandata))
 
 Fill in missing values by day time average, then average by day using a three time period window
 ```{r fill in missing}
+setwd(SubDataSets)
 cleandata <- readRDS("cleandata.rds")
+#add in missing row for day 177
+missingrow <-matrix(NA, nrow=1,ncol=ncol(cleandata)) %>% as.data.frame %>%
+  mutate_all(funs(as.numeric))
+names(missingrow) <- names(cleandata)
+
+missingrow <- missingrow  %>% mutate(Date.Time= as.POSIXct("2011-10-25 18:00:00", tz="Europe/London") + minutes(30))
+
+cleandata <- cleandata %>% bind_rows(., missingrow) %>% 
+  arrange(Date.Time)
+
+#make a data frame of average day hour in values
 dayhourmin <- paste(wday(cleandata$Date.Time),
                     hour(cleandata$Date.Time),
                     minute(cleandata$Date.Time),
@@ -338,10 +350,11 @@ cleandata[rowIDs,colID] <- meanvals[RowsFromMeanVals,colID] %>%unlist
 if((i%%100)==0){print(i)}  
 }
 
+#check there are no Na values
 cleandata %>% is.na %>% sum
 saveRDS(cleandata, file="cleandatafilled.rds")
 
-rm(list= c("NACols","dayhourmin", "i","RowsFromMeanVals", "navect", "meanvals", "colID", "rowIDs"))
+rm(list= c("NACols","dayhourmin", "i","RowsFromMeanVals", "navect", "meanvals", "colID", "rowIDs", "missingrow"))
 
 ```
 
@@ -350,6 +363,10 @@ Save each day as a file for making into graphs
 ```{r savedaydata}
 
 datevect <- cleandata$Date.Time %>%as.Date() %>% unique
+# i<-177
+# test <- filter(cleandata, as.Date(Date.Time)==datevect[i])
+# filter(cleandata, as.Date(Date.Time)==datevect[i]) %>%
+#     saveRDS(., paste("date_", datevect[i] ,sep=""))
 
 setwd(daytimeseries)
 for (i in 1:length(datevect)){
@@ -552,13 +569,15 @@ NA's caused an automatic link and so all NA's were replaced with 0's
 ```{r singlegraph}
 
 setwd(daytimeseries)
-filename <- list.files()[101]#day 100 is the cool ring graph when cut off is .92
-graph <- createweightmat(filename)
+setwd(Cormats)
+filename <- list.files()[177]#day 100 is the cool ring graph when cut off is .92
+
+graph <- readRDS(filename)
 graph2 <-createcleangraph2(graph, graph>0.7 )
 graph2 <-detectcomms(graph2)
+
 setwd(SubDataSets)
 write.graph(graph2, "day100-92.graphml", format = "graphml")
-
 get.vertex.attribute(graph2, "ClusterID", index=V(graph2)) %>% unique()
 
 fc <-fastgreedy.community(graph2)
@@ -630,8 +649,11 @@ saveRDS(nodeclustlist, "nodeclustlist.rds")
 #nodeclustlist <- readRDS("nodeclustlist.rds")
 
 
-test <- lapply(nodeclustlist, function(n) n[,1]) %>% bind_cols() %>% t %>% as.data.frame %>% mutate_all(funs(as.factor))
+#does this need to be tested to make sure the nodes are al in the same order?
+test <- lapply(nodeclustlist, function(n) n[,1])%>% bind_cols() %>%
+  t %>% as.data.frame %>% mutate_all(funs(as.factor))
 
+#the results show that each row only has 1 unique variable which means the nodes are all in the same order
 test %>% sapply(., function(n) unique(n) %>% length) %>% summary
 
 #make a dataframe that contains all nodes
@@ -647,12 +669,12 @@ testmat <- lapply(nodeclustlist, function(n) n[,-1]) %>% bind_cols()
 testmat[is.na(testmat)] <- 0
 (testmat %>% colSums())[c(4293, 6066)]
 
-
-#combine all cluster matrices into a single cluster matrix
-testmat <- Reduce(function(...) merge(..., 
-                                      by="NodeID", 
-                                      all=TRUE), 
-                  nodeclustlist)
+#This messes up the order 
+# #combine all cluster matrices into a single cluster matrix
+# testmat <- Reduce(function(...) merge(..., 
+#                                       by="NodeID", 
+#                                       all=TRUE), 
+#                   nodeclustlist)
 
 NodeClust<-bind_cols(NodeClust, testmat)
 rm(testmat)
@@ -693,6 +715,19 @@ Clustconversion <-lapply(1:length(nodeclustlist), function(n){
 
 rm(dayorder)
 
+clustdaycount <- Clustconversion %>% group_by(day) %>%
+  summarise(counts= n()) %>% ungroup %>% 
+  mutate(cumsum = cumsum(counts), startrow= cumsum(c(1,counts))[-(nrow(.)+1)], endrow = cumsum)
+
+#changeing nodeclustlist titles to unique names
+
+lapply(nodeclustlist, function(n){
+  x <- nodeclustlist[[n]] 
+})
+
+x <- nodeclustlist[[180]]
+
+
 ```
 
 
@@ -702,6 +737,7 @@ rm(dayorder)
 setwd(daytimeseries)
 dates <- list.files() %>%sub("date_", "",.)
 
+as.character(dates) %in% as.character(unique(Clustconversion$date))
 #Makes a load profile for every single cluster represented in the clusterconversion dataframe... take time to calculate
 allprofiles<-mclapply(dates, function(n){
   daydata <- CreateLoadProfile(n)
@@ -716,11 +752,12 @@ allprofiles<-mclapply(dates, function(n){
   }, mc.cores = detectCores())
 
 #inspect a random cluster profile
-test <- clusterprofile[[100]] %>% gather(., key= clusterID, value=kwh, -time) 
+test <- allprofiles[[177]] %>% gather(., key= clusterID, value=kwh, -time) 
 ggplot(test, aes(x=time, y=kwh,group= clusterID, colour=clusterID)) +geom_line()
 
 #this second bit of code is because I got worried the nodes weren't being linked in the right order
 #creates a loadprofile data frame of all the uniqely named clusters across all time periods
+n<-177
 clusterprofile <- lapply(1:length(allprofiles), function(n){
     dayID <-n
     print(n)
@@ -730,12 +767,35 @@ clusterprofile <- lapply(1:length(allprofiles), function(n){
 
     return(x)
   }
-) %>% Reduce(function(...) merge(..., by='time', 
-                             all.x=TRUE), .)
+) 
 
-#Fill in NA's caused by the missing half hour period in day 177/ 2011-10-25
-#Fill is done by finding the mean of the kwh on either side of the na
-clusterprofile[6,c(FALSE,is.na(colSums(clusterprofile[,-1])))] <- clusterprofile[c(5,7),c(FALSE,is.na(colSums(clusterprofile[,-1])))] %>%t %>%rowMeans
+data.frame(allprofiles= sapply(allprofiles, ncol),
+           clustconv = clustdaycount$counts)
+
+test <- allprofiles[[180]]
+is.na(test) %>% sum
+# 
+# THe 177 missing row has been corrected in the fill in missing chunk
+# #day 177 has a missing row, this is a hack to fill in the missing row with NAs
+
+#Left join with day 1 as that will forces the data frame to open up and have a row of Na's at the missing time period
+clusterprofile[[which(sapply(clusterprofile, nrow)==11)]]<- clusterprofile[[1]] %>%select(time) %>% left_join(.,clusterprofile[[which(sapply(clusterprofile, nrow)==11)]])
+
+#fill the NA's with the mean of the values on either side
+clusterprofile[[which(sapply(clusterprofile, function(n) sum(is.na(n))>0))]][6,-1] <- clusterprofile[[which(sapply(clusterprofile, function(n) sum(is.na(n))>0))]][c(5,7),-1] %>%t %>% rowMeans
+
+#bind the columns together as they are all in time order
+clusterprofile <- lapply(clusterprofile, function(n) n[,-1]) %>% bind_cols()
+
+
+#thus function caused ordering problems on nodeclustlist so I am replacing it with my code wich solved the problem
+# %>% Reduce(function(...) merge(..., by='time', 
+#                              all.x=TRUE), .)
+
+#Not needed now new code is completed
+# #Fill in NA's caused by the missing half hour period in day 177/ 2011-10-25
+# #Fill is done by finding the mean of the kwh on either side of the na
+# clusterprofile[6,c(FALSE,is.na(colSums(clusterprofile[,-1])))] <- clusterprofile[c(5,7),c(FALSE,is.na(colSums(clusterprofile[,-1])))] %>%t %>%rowMeans
 
 
 
@@ -888,9 +948,9 @@ nodeclust4<-nodeclust2 %>% select(-ClustID) %>%
   mutate(rowsums = rowSums(.)) %>%
   select(rowsums)%>%mutate(rownames = tempnames)
 
-ggplot(nodeclust4, aes(x=rowsums)) +geom_density() +
+ggplot(nodeclust4, aes(x=rowsums)) +geom_density( fill="steelblue", alpha =0.7) +
   ggtitle("Density plot of node Stability") + xlab("sum of squared probability")
-setwd(file.path(Figures,"Method"))
+setwd(file.path(Figures,"Results"))
 ggsave("stabilitydens.pdf")
  
  #Boxplot of social class broken out by stability 
@@ -944,10 +1004,6 @@ setwd(SubDataSets)
 NodeClust<-readRDS("NodeClust.rds")
 Clustconversion <- readRDS("Clustconversion.rds")
 #names(NodeClust)[-1] <- Clustconversion$UniqueID
-
-clustdaycount <- Clustconversion %>% group_by(day) %>%
-  summarise(counts= n()) %>% ungroup %>% 
-  mutate(cumsum = cumsum(counts), startrow= cumsum(c(1,counts))[-(nrow(.)+1)], endrow = cumsum)
 
 
 names(NodeClust)[-1]<- Clustconversion$UniqueID
@@ -1026,11 +1082,20 @@ percVolume[Large] %>%sum
 Filter the node cluster data frame so that small clusters are converted into soup
 ```{r ConvertToSoup}
 #turn all the small clusters to soup
-ClusterID %>% mutate(ClustIDSoup= ifelse(Large,ClustID,"soup"))
+ClusterID %<>% mutate(ClustIDSoup= ifelse(Large,ClustID,"soup"))
+
+nas <-filter(Clustconversion,is.na(issoup)) 
+unique(nas$ClustID) 
+ 
+match(Clustconversion$ClustID,ClusterID$ClustID)
 
 
-issoup <- ClusterID$ClustIDSoup[match(Clustconversion$ClustID, ClusterID$ClustID)]
+issoup <- ClusterID$ClustIDSoup[match(Clustconversion$ClustID,ClusterID$ClustID)]
 Clustconversion$ClustID <- issoup 
+
+setwd(SubDataSets)
+saveRDS(Clustconversion, "Clustconversion.rds")
+
 
 NodeClustSoup<- NodeClust[,-1] %>%t %>% as.data.frame %>%
   mutate(ClustID=Clustconversion$ClustID) %>% 
@@ -1058,6 +1123,7 @@ Nodestab <-NodeClustSoup[,-1] %>%
   mutate(stability = rowSums(.)) %>%
   select(stability)%>%mutate(NodeID = tempnames) 
 
+ggplot(Nodestab, aes(x=stability)) +geom_density()
 ```
 
 Plot the nodes existance per day including soup
@@ -1087,8 +1153,26 @@ filter(day>95, day<110)
 
 rm(test)
 
+setwd(file.path(Figures, "Results"))
+SankeyData(95:101,SankeyFrame, Clustconversion, SOUP = FALSE)
+SankeyData(102:108,SankeyFrame, Clustconversion, SOUP = FALSE)
 
-SankeyData(50:56,SankeyFrame, Clustconversion)
+
+test <-SankeyData(95:102,SankeyFrame, Clustconversion, simple = F)
+
+test2<- test$SankeyNodes
+Sankey2<- test$Sankey2
+
+ sankeyNetwork(Links=test$Sankey2,
+                     Nodes=test$SankeyNodes,
+                     NodeID = "UniqueID",
+                     Source="source",
+                     Target= "target",
+                     Value = "Nodes",
+                     NodeGroup = "ClustID",
+                     fontSize = 0,
+                     colourScale = JS(test$SankeyColours),
+                     iterations = 32)
 
 ```
 
