@@ -14,7 +14,8 @@ CreateLoadProfile <- function(date, Graphdir=GraphPath, daydata=daytimeseries){
   x<- daydata[(daydata[,-13])%>% rowSums %>% is.na %>% which,]
   
   clusters <-data.frame(NodeID= get.vertex.attribute(graph3, "name"), 
-                        ClusterID = as.character(get.vertex.attribute(graph3, "ClusterID")))
+                        ClusterID = as.character(get.vertex.attribute(graph3, "ClusterID"))) %>%
+    mutate(NodeID = as.character(NodeID))
   
   
   daydata <- daydata %>% mutate(NodeID = as.character(rownames(.))) %>%

@@ -9,26 +9,11 @@ Note inlcuding apps is ok atm but this could explode into a large amount of data
 
 includeSyncDropbox("Apps")
 
-excludeSyncDropbox("/home/rstudio/Dropbox/Apps/ShareLaTeX/*")
-
-includeSyncDropbox("/home/rstudio/Dropbox/Apps/ShareLaTeX/University-College-London-thesis/Figures")
-
-includeSyncDropbox("Apps/ShareLaTeX")
-excludeSyncDropbox("~/Dropbox/Apps/ShareLaTeX/*")
-
 includeSyncDropbox("Thesis Data")
 
 Degreeness of the graphs
 Betweeness
 Life expectancy
-
-order clusters by size and plot the results
-
-predicitve model
-
-is there a sig lower stdved for clusters compared to un clustered. load profiles
-
-Look at the sensitivity of the model etc, eg corellation cut off amount of days available,...
 
 ```{r Packages}
 packages <-c("stringr", "lubridate", "data.table","caret", "xgboost","e1071", "R.utils", "corrplot", "Hmisc", "Amelia", "Matrix", "ff", "ggdendro", "zoo", "networkD3", "igraph","parallel", "magrittr", "ggplot2", "tidyr", "xtable","dplyr")
@@ -572,13 +557,16 @@ setwd(daytimeseries)
 setwd(Cormats)
 filename <- list.files()[177]#day 100 is the cool ring graph when cut off is .92
 
-graph <- readRDS(filename)
-graph2 <-createcleangraph2(graph, graph>0.7 )
+graph2 <- readRDS(filename)
+graph2 <-createcleangraph2(graph2, graph2>0.7 )
 graph2 <-detectcomms(graph2)
 
 setwd(SubDataSets)
 write.graph(graph2, "day100-92.graphml", format = "graphml")
 get.vertex.attribute(graph2, "ClusterID", index=V(graph2)) %>% unique()
+
+setwd(GraphPath)
+write.graph(graph2, "date_2011-10-25.graphml", format = "graphml")
 
 fc <-fastgreedy.community(graph2)
 wc <-walktrap.community(graph2)
@@ -628,8 +616,10 @@ Take the nodes that make up each vector and construct a vector that includes all
 #Load each graph file and create a list of clust vector matrices
 setwd(GraphPath)
 files <- list.files()
-#n<-files[96]
-nodeclustlist <-mclapply(files, function(n){
+
+#The Mclapply version kept crashing so the part is done in single
+
+nodeclustlist <-lapply(files, function(n){
   graph <- read_graph(n, format="graphml")
   vertices <-data.frame(NodeID= V(graph)$name, 
                       cluster=
@@ -637,12 +627,13 @@ nodeclustlist <-mclapply(files, function(n){
                         mutate(yesno=1)%>%
   spread(., key= cluster, value=yesno) %>% 
   mutate(NodeID= as.character(NodeID))
-  print(n)
+  print(paste("file:", n," date:",  grep(n, files)))
   vertices
-}, mc.cores= detectCores()
+}
 )
 
-names(nodeclustlist)<-sub(".rds", "",files) %>%sub("date_","",.) %>%ymd
+
+names(nodeclustlist)<-sub(".graphml", "",files) %>%sub("date_","",.) %>%ymd
 
 setwd(SubDataSets)
 saveRDS(nodeclustlist, "nodeclustlist.rds")
@@ -659,11 +650,15 @@ test %>% sapply(., function(n) unique(n) %>% length) %>% summary
 #make a dataframe that contains all nodes
 setwd(daytimeseries)
 
+#as all the nodes are inlcuded any day can be used
 NodeClust<- readRDS(list.files()[1]) %>%names() 
 
 NodeClust<- data.frame(NodeID=as.character(NodeClust[-1])%>% 
-  make.names) %>%mutate(NodeID = as.character(NodeID))
+  make.names) %>%mutate(NodeID = as.character(NodeID)) %>% arrange(NodeID)
 
+#check NodeClust and Nodeclustlist are in the same order
+all.equal(NodeClust$NodeID, nodeclustlist$`2011-05-01`$NodeID )
+#they are because NodeClust List has been arranged in the correct order
 
 testmat <- lapply(nodeclustlist, function(n) n[,-1]) %>% bind_cols()
 testmat[is.na(testmat)] <- 0
@@ -685,8 +680,6 @@ testmat2 <-readRDS(list.files()[1]) %>%names()  %>% data.frame(NodeID=as.charact
 
 #names(NodeClust)[-1]<-make.names(1:ncol(NodeClust[,-1])) #give them all unique names
 
-#Fills in the spread variables with 0 this is an expected result and not a bug
-NodeClust[is.na(NodeClust)] <- 0
 setwd(SubDataSets)
 saveRDS(NodeClust, "NodeClust.rds")
 #NodeClust<-readRDS("NodeClust.rds")
@@ -719,15 +712,6 @@ clustdaycount <- Clustconversion %>% group_by(day) %>%
   summarise(counts= n()) %>% ungroup %>% 
   mutate(cumsum = cumsum(counts), startrow= cumsum(c(1,counts))[-(nrow(.)+1)], endrow = cumsum)
 
-#changeing nodeclustlist titles to unique names
-
-lapply(nodeclustlist, function(n){
-  x <- nodeclustlist[[n]] 
-})
-
-x <- nodeclustlist[[180]]
-
-
 ```
 
 
@@ -739,12 +723,14 @@ dates <- list.files() %>%sub("date_", "",.)
 
 as.character(dates) %in% as.character(unique(Clustconversion$date))
 #Makes a load profile for every single cluster represented in the clusterconversion dataframe... take time to calculate
+
+
 allprofiles<-mclapply(dates, function(n){
   daydata <- CreateLoadProfile(n)
-  variable <- "mean"
+  variable <- "mean" #the metric to use
   print(n)
-  #the filtering of NA needs to be removed at some point as it will cause problems later on
-  daydata2 <- daydata %>% filter(., !is.na(ClusterID)) %>%
+
+    daydata2 <- daydata %>% 
     select_("ClusterID", "time", variable) %>%
     spread_(., key="ClusterID", value=variable) %>% 
     mutate(time= format(.$time, format="%H:%M:%S"))
@@ -769,34 +755,19 @@ clusterprofile <- lapply(1:length(allprofiles), function(n){
   }
 ) 
 
-data.frame(allprofiles= sapply(allprofiles, ncol),
+data.frame(allprofiles= sapply(allprofiles, ncol)-1,
            clustconv = clustdaycount$counts)
 
 test <- allprofiles[[180]]
 is.na(test) %>% sum
-# 
-# THe 177 missing row has been corrected in the fill in missing chunk
-# #day 177 has a missing row, this is a hack to fill in the missing row with NAs
-
-#Left join with day 1 as that will forces the data frame to open up and have a row of Na's at the missing time period
-clusterprofile[[which(sapply(clusterprofile, nrow)==11)]]<- clusterprofile[[1]] %>%select(time) %>% left_join(.,clusterprofile[[which(sapply(clusterprofile, nrow)==11)]])
-
-#fill the NA's with the mean of the values on either side
-clusterprofile[[which(sapply(clusterprofile, function(n) sum(is.na(n))>0))]][6,-1] <- clusterprofile[[which(sapply(clusterprofile, function(n) sum(is.na(n))>0))]][c(5,7),-1] %>%t %>% rowMeans
-
-#bind the columns together as they are all in time order
-clusterprofile <- lapply(clusterprofile, function(n) n[,-1]) %>% bind_cols()
 
 
-#thus function caused ordering problems on nodeclustlist so I am replacing it with my code wich solved the problem
-# %>% Reduce(function(...) merge(..., by='time', 
-#                              all.x=TRUE), .)
+clusterprofile <- clusterprofile[[1]] %>% select(time)
 
-#Not needed now new code is completed
-# #Fill in NA's caused by the missing half hour period in day 177/ 2011-10-25
-# #Fill is done by finding the mean of the kwh on either side of the na
-# clusterprofile[6,c(FALSE,is.na(colSums(clusterprofile[,-1])))] <- clusterprofile[c(5,7),c(FALSE,is.na(colSums(clusterprofile[,-1])))] %>%t %>%rowMeans
-
+for (i in 1:length(clusterprofile)) {
+  print(i)
+  clusterprofile <- left_join(clusterprofile, clusterprofile[[i]], by="time")   
+}
 
 
 setwd(SubDataSets)
@@ -805,8 +776,10 @@ saveRDS(clusterprofile,"clusterprofile.rds" )
 
 ClustComms <- cor(clusterprofile[,-1])
 
-#not necessary after filling in the missing half hour in the lcusterprofile
-#ClustComms[is.na(ClustComms)]<-0 #remove NA's for clustering
+# the below vector shows which of the columns have smart meters with zero varience, they will return NA's in the corellation step
+nearZeroVar(clusterprofile)
+
+ClustComms[is.na(ClustComms)]<-0 #remove NA's for clustering
 saveRDS(ClustComms,"ClustComms.rds")
 #ClustComms <-readRDS("ClustComms.rds")
 
@@ -814,7 +787,7 @@ orderedheat(ClustComms, merge=5, mid=0, simMat=TRUE, legend = "corellation") + g
 setwd(file.path(Figures,"Method"))
 ggsave("ClusterCorLoadall.pdf")
 
-LargeClusts <- filter(Clustconversion, NodesInCluster>100)$UniqueID %>%
+LargeClusts <- filter(Clustconversion, NodesInCluster>50)$UniqueID %>%
   match(.,colnames(ClustComms))
 
 
@@ -824,7 +797,7 @@ orderedheat(ClustComms2, merge=1, mid=0, simMat=TRUE, legend = "correlation") + 
 ggsave("ClusterCorLoadLarge.pdf")
 
 ClustComms2[is.na(ClustComms2)]<-0
-Clustergraph <- createcleangraph2(ClustComms2, ClustComms2 >0.9)
+Clustergraph <- createcleangraph2(ClustComms2, ClustComms2 >0.85)
       print("Graph created")
       Clustergraph <-detectcomms(Clustergraph)
       print("Clusters detected")
@@ -900,13 +873,18 @@ test <- orderedheat(is.na(weightmat)*1, simMat = TRUE, xblocks = 2, yblocks = 2,
 
 ```{r Conversion ClustID}
 
-UniqueClusters<- data.frame(UniqueID= filter(Clustconversion, NodesInCluster>100)$UniqueID, 
+UniqueClusters<- data.frame(UniqueID= V(Clustergraph)$name ,
                       ClustID= get.vertex.attribute(Clustergraph, name = "ClusterID"),
                       stringsAsFactors =FALSE)
 
 Clustconversion <- Clustconversion%>% 
   left_join(.,UniqueClusters, by="UniqueID") %>%
   mutate(ClustID= ifelse(is.na(ClustID),"soup",ClustID))
+
+#remove clusters that have less than 1% of node volumn
+
+LargeClusts <- Clustconversion %>%
+
 saveRDS(Clustconversion,"Clustconversion.rds")
 rm(UniqueClusters)
 
@@ -964,7 +942,7 @@ ggsave("stabilitydens.pdf")
 
 What clusters are present on each day?
 ```{r Cluster Plots}
-Clustconversion %>% filter(NodesInCluster>100, IntraDayRank<=5) %>%
+Clustconversion %>% filter(ClustID!="soup", IntraDayRank<=5) %>%
   ggplot(.,aes(x=date, y= NodesInCluster, colour= as.factor(IntraDayRank))) +
   geom_line()+ggtitle("Top 5 clusters plotted by rank across all days") +
   guides(colour=guide_legend(title="Intra day rank"))+ylab("Number of nodes in Cluster")
@@ -979,7 +957,7 @@ summary(Clustsperday)
 sapply(Clustsperday[,-1], sd)
 
 
-#This needs fixing
+
 Clustsperday %>% gather(., Clustertype,number,-date) %>%
   ggplot(., aes(x=date, y= number, colour=Clustertype)) +geom_line()+
   ylab("Total number of Clusters")+
@@ -1441,5 +1419,27 @@ unique(NodeClust2$NodeID)%>% length
 test<- Clustconversion %>%group_by(ClustID) %>%summarise(NodesInCluster=mean(NodesInCluster), occurances=n(), date= first(date)) %>%filter(occurances==1)
 ```
 
+
+SOmething is not going right somewhere, I hope I can fix it.
+THere is som problem with the clusters not matching up again
+```{r WTF Clusters}
+
+setwd(daytimeseries)
+days <-list.files()
+
+setwd(Cormats)
+Cors <- list.files()
+
+setwd(GraphPath)
+Graphs <-list.files()
+
+length(days);length(Cors);length(Graphs)
+
+Gstrip <-Graphs %>% sub("date_", "",.) %>% sub(".graphml", "",.)
+Corstrip <- Cors %>% sub("date_", "",.) %>% sub(".rds", "",.)
+
+#I found that I had made an additional graph and this was de-synching, have to check to see if this has fixed the error
+
+```
 
 
