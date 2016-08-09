@@ -1,3 +1,7 @@
+#Creates the load profile required to plot various metrics
+#the profiles created are the unique cluster profiles.
+#This allows for the creation of the graph of clusters
+ 
 CreateLoadProfile <- function(date, Graphdir=GraphPath, daydata=daytimeseries){
   setwd(Graphdir)
   date <-paste("date_",date,sep="")
@@ -13,9 +17,11 @@ CreateLoadProfile <- function(date, Graphdir=GraphPath, daydata=daytimeseries){
   
   x<- daydata[(daydata[,-13])%>% rowSums %>% is.na %>% which,]
   
+#  Clustconversion2 <- Clustconversion %>% filter(date==)
+  
   clusters <-data.frame(NodeID= get.vertex.attribute(graph3, "name"), 
                         ClusterID = as.character(get.vertex.attribute(graph3, "ClusterID"))) %>%
-    mutate(NodeID = as.character(NodeID))
+    mutate(NodeID = as.character(NodeID))# %>% left_join(.,Clustconversion2, )
   
   
   daydata <- daydata %>% mutate(NodeID = as.character(rownames(.))) %>%

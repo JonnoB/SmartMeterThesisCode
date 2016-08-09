@@ -54,7 +54,7 @@ smartdata <- lapply(list.files(), readRDS) %>% bind_rows(.)
 #jaccard data removed as it didnt really work and was replaced with a behaviour based method
 ```{r}
 
-jaccardclust <- jaccard(t(NodeClust[,-1])) %>% as.matrix %>%as.data.frame
+jaccardclust <- jaccard((NodeClust[,-1])) %>% as.matrix %>%as.data.frame
 
 orderedheat(jaccardclust, order="both", 
                    xblocks=1,yblocks = 1, merge=5,
