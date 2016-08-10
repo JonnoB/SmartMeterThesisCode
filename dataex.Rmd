@@ -223,6 +223,7 @@ setwd(SubDataSets)
 #makes a matrix where 1 means there is data and 0 means NA
 lowerclust <- isnaframe[, ordering$Colorder[lowerclustID]]%>% as.data.frame
 saveRDS(lowerclust, "lowerclust.rds")
+#lowerclust <- readRDS("lowerclust.rds")
 lowertimepercs <- rowSums(lowerclust)/ncol(lowerclust)
 
 setwd(Figures)
@@ -239,7 +240,7 @@ ggplot(nonmissing, aes(x= cutoff, y= TimePeriods)) + geom_line() +ggtitle("Numbe
 ggsave("NAtimeperiodslowerclust.pdf")
 
 
-#Remove Time periods with less than 75% valid data
+#Remove Time periods with less than 90% valid data
 lowerclust <- lowerclust[lowertimepercs>0.9,]
 
 lowermeterpercs <- colSums(lowerclust)/nrow(lowerclust)
@@ -263,9 +264,20 @@ rm(lowerclust)
 setwd(SubDataSets)
 smartdata <- readRDS("smartdata.rds")
 
+#Check how many days are missing to have contiguous days from start to finish in the block
+
+datevect <- as.Date(smartdata$Date.Time)[lowertimepercs>0.9] %>% unique
+alldays <-seq(from=min(datevect) , to=max(datevect),by = "day") 
+MissingDays <-alldays[!(alldays %in% unique(datevect))] 
+
+#there are only three days missing for a full house make a vector to inlcude them as well
+MissingDays <-as.Date(smartdata$Date.Time) %in% MissingDays
+
 cleandata <-smartdata[,c(1,(1+ordering$Colorder[lowerclustID]))]
 size <- ncol(cleandata)*nrow(cleandata)
-cleandata <- cleandata[lowertimepercs>0.9, c(TRUE,lowermeterpercs >0.99)]
+cleandata <- cleandata[(lowertimepercs>0.9|MissingDays), c(TRUE,lowermeterpercs >0.99)]
+
+
 
 ncol(cleandata)*nrow(cleandata)/size #amount of remaingin data
 
@@ -343,6 +355,12 @@ saveRDS(cleandata, file="cleandatafilled.rds")
 
 
 rm(list= c("NACols","dayhourmin", "i","RowsFromMeanVals", "navect", "meanvals", "colID", "rowIDs", "missingrow"))
+
+
+
+#Missing days--- The below code findds which days are missing from clusterconversion
+  alldays <-seq(from=min(clustest$date) , to=max(clustest$date),by = "day") 
+alldays[!(alldays %in% unique(Clustconversion$date))] 
 
 ```
 
@@ -1115,7 +1133,6 @@ nodeclust2<-nodeclust2[,-1] %>%t %>%as.data.frame %>%
   summarise_each(funs(sum(., na.rm= TRUE))) %>% ungroup() 
 #rownames(nodeclust2) <-nodeclust2[,1] %>%as.matrix()
 
-
 #these appear to be saying that the node and cluster are independent when using the baysian method, when using the frequentist method they say that they are dependent
 
 mi.empirical(nodeclust2[,-1])
@@ -1136,7 +1153,8 @@ orderedheat((testratio),order="none", merge=1, mid = 1, legend="Ratio")+labs(tit
   scale_x_continuous(breaks = 1:10, 
                     labels = Clusttrans$ClustID)+ 
  scale_y_continuous(breaks = 10:1, 
-                    labels = Clusttrans$ClustID) + theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+                    labels = Clusttrans$ClustID) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
 setwd(file.path(Figures, "Results"))
 ggsave("ChiObsEx.pdf")
 
@@ -1165,6 +1183,16 @@ ClusterFamilyInfo <- Clustconversion %>%
   ungroup %>%
   mutate(rank=rank(-TotNodes))
 
+#Heat map of whether a cluster exists on a given day
+clustest <- Clustconversion%>% mutate(yesno=1) %>% 
+  select(ClustID, date, yesno) %>% group_by(ClustID, date) %>%
+  summarise(yesno=first(yesno)) %>% ungroup 
+
+clustest %>% ggplot(., aes(x=date, y=ClustID))+   geom_raster() + 
+    scale_fill_gradient2(low="blue",mid = "white" ,high = "red", midpoint = mid, name=legend)+theme_minimal() +
+
+  
+rm(clustest)
 ```
 
 
@@ -1688,6 +1716,9 @@ PredTrans <- (PredTrans/rowSums(PredTrans)) %>% as.matrix
 AllClusts <- unique(Clustconversion$ClustID)%>%
   data.frame(ClustID=.) %>% arrange(ClustID)
 
+
+#Matrix predicting the number of nodes in each cluster
+#Uses days 200 to 242 to predict 201 to 243
 predictmat <- lapply(200:242, function(n){
 
 source <-Clustconversion %>% filter(day ==n) %>% group_by(ClustID)%>%
@@ -1700,7 +1731,7 @@ predicted <- (t(source$NodesInCluster) %*% PredTrans) %>%as.data.frame
 
 
 
-#Create a matrix of the target number of Node in each cluster per day
+#Create a matrix of the target/actual number of Nodes in each cluster per day
 targetmat <- lapply(201:243, function(n){
 target <-Clustconversion %>% filter(day ==n) %>% group_by(ClustID)%>%
   summarise(NodesInCluster=sum(NodesInCluster)) %>% ungroup %>%
@@ -1729,33 +1760,38 @@ DayProfile <-clusterprofile %>%
   spread(key= time, value= kwh)
 
 
+#vector of days 201 to 243
 datevect <- (Clustconversion %>% filter(day>200))$date %>% unique
 
 #The actual mean profile for the the nodes in the test set
 DayProfile <- DayProfilemat(datevect, AllClusts)
 
-test <- bind_cols(data.frame(date=datevect), predictmat) %>% 
+#Join the predicted node amounts to the date the prediction is for and gather the resulting data frame
+predictmat2 <- bind_cols(data.frame(date=datevect), predictmat) %>% 
   gather(., key = ClustID, value = Nodes,-date)
 
-# get the profile of each cluster
-test2 <-DayProfile%>%
-  mutate_at(.,vars(matches("0")),funs(.*test$Nodes))
 
-test3 <-DayProfile%>%
-  mutate_at(.,vars(matches("0")),funs(.*lag(test$Nodes,10)))%>% select(-ClustID)%>%group_by(date) %>% 
+targetmat2 <- bind_cols(data.frame(date=datevect), targetmat) %>% gather(., key=ClustID, value= Nodes, -date)
+
+# get the Load profile of each cluster
+#this should be the actual load profile
+test2 <-DayProfile%>%
+  mutate_at(.,vars(matches("0")),funs(.*targetmat2$Nodes))
+  
+#Find the predicted load by multiplying the predicted cluster volumes by the mean load profile for the previous day.
+PredLoad<-DayProfile%>%
+  mutate_at(.,vars(matches("0")),funs(.*lag(predictmat2$Nodes,10)))%>% select(-ClustID)%>%group_by(date) %>% 
   summarise_all(funs(sum))
 
 
-# get the predicted profile of each cluster
+
+# Get the predicted profile of each cluster
 DayProfile2 <- test2 %>% select(-ClustID)%>%group_by(date) %>% 
   summarise_all(funs(sum))
 
-resids <- (DayProfile2[-1,-1]-test3[-1,-1]) %>% as.data.frame %>%
-  bind_cols(select(test3[-1,],date),.) %>% mutate(day = weekdays(date))
+resids <- (DayProfile2[-1,-1]-PredLoad[-1,-1]) %>% as.data.frame %>%
+  bind_cols(select(PredLoad[-1,],date),.) %>% mutate(day = weekdays(date))
 
-x <- resids[,c(1,14, 2:13)]
-
-resids^2 %>%rowMeans() %>% sqrt
 
 #dates have to be shifted 1 day as the prediction is one day ahead
 colourframe <- data.frame(date=datevect) %>% mutate(colour = ifelse(date=="2011-12-24","#FF0000","#000000"),colour = ifelse(date=="2011-12-23","#33ff00", colour))
@@ -1765,7 +1801,7 @@ mean(abs((y - yhat)/y))}
 
 results <-left_join(
   gather(DayProfile2, key= time, value=Actual, -date),
-              gather(test3, key= time, value=Predicted, -date),
+              gather(PredLoad, key= time, value=Predicted, -date),
           by=c("date", "time")) %>%
   mutate(residuals= Actual-Predicted) %>%
   filter(!is.na(Predicted)) %>% 
@@ -1817,7 +1853,56 @@ mape(ResNoX$Predicted, ResNoX$Actual)
 
 ```{r Lin Pred}
 
+Portfolio <- cleandata %>% select(-Date.Time) %>% rowSums %>% 
+  data.frame(Date.Time= cleandata[,1], kwh = .) %>% 
+  mutate(date= as.Date(Date.Time), 
+         time = format(Date.Time, format="%H:%M"),
+         weekday = weekdays(Date.Time),
+         month = months(Date.Time)) %>%
+  mutate(daylag= lag(kwh,1),
+         weeklag = lag(kwh,7) )
 
+moddat <- Portfolio %>% select(kwh,daylag, weeklag, date) %>% filter(!is.na(weeklag))
+
+train <-moddat %>% filter(date <="2011-11-18")
+
+test <-moddat %>% filter(date >"2011-12-18")
+
+mod1 <- train(x= train[,2:3], y= train[,1], method="lm")
+
+linpreds <- predict(mod1, test[,2:3])
+
+res <- postResample(linpreds, test[,1] )
+res
+mape(linpreds, test[,1] )
+
+#check bayesian model
+postResample(results$Predicted, test[,1])
+mape(results$Predicted,test[,1])
+
+
+```
+
+Clean data daily profiles
+```{r portfolio Load}
+
+
+Portfolio %>% group_by(time, weekday) %>% summarise(kwh= mean(kwh), sd = sd(kwh)) %>% mutate(group=1, lsd= kwh-sd(kwh), usd=kwh+sd(kwh))%>% 
+  ggplot(., aes(x=time, y= kwh, group= weekday)) +
+#  geom_ribbon(aes(ymin=lsd, ymax=usd), fill= "grey70")+
+  geom_line(aes(colour= weekday)) +ggtitle("Mean evening profile for each weekday")
+setwd(file.path(Figures, "Results"))
+ggsave("PortfolioLoad.pdf")
+
+Portfolio %>% group_by(date, month) %>% summarise(kwh= sum(kwh)) %>% 
+  ungroup%>%
+  mutate(group=1, 
+         month =factor(month,levels=unique(p2$month) ))%>% 
+  ggplot(., aes(x=month, y= kwh, group= month)) +
+  geom_boxplot(aes(fill= month)) +ggtitle("Daily consumption across months")  + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+        legend.position="none")
+ggsave("DailyConsumptionMonths.pdf")
 
 ```
 
