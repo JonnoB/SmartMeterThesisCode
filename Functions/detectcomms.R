@@ -1,7 +1,7 @@
 detectcomms <- function(graph){
   
   #fc <- fastgreedy.community(graph)
-  fc <- walktrap.community(graph)
+  fc <- cluster_louvain(graph)
   community <-membership(fc) %>%table %>% as.data.frame()
   names(community)[1] <- "community_number"
   community$community_number<-community$community_number

@@ -143,6 +143,7 @@ rm(smartdata)
 ordering <- createorder(isnaframe, order="both", simMat= FALSE,xblocks=5, yblocks=5, par=TRUE)
 
 saveRDS(ordering, "isnaordering.rds")
+#ordering <- readRDS("isnaordering.rds")
 ```
 
 Pre cleaning unordered
@@ -356,12 +357,6 @@ saveRDS(cleandata, file="cleandatafilled.rds")
 
 rm(list= c("NACols","dayhourmin", "i","RowsFromMeanVals", "navect", "meanvals", "colID", "rowIDs", "missingrow"))
 
-
-
-#Missing days--- The below code findds which days are missing from clusterconversion
-  alldays <-seq(from=min(clustest$date) , to=max(clustest$date),by = "day") 
-alldays[!(alldays %in% unique(Clustconversion$date))] 
-
 ```
 
 
@@ -387,37 +382,21 @@ IntCorList <- mclapply(unique(IntCor$NodeID), function(n){
   },
 mc.cores=detectCores())
 
-IntCorVis <-orderedheat(IntCorList[[1]], order="both", simMat = TRUE, merge = 1, mid = 0)
+#visualise the corellation matrix of the first smart mater
+IntCorVis <-orderedheat(IntCorList[[2]], order="both", simMat = TRUE, merge = 1, mid = 0)
 IntCorVis
 
 IntCorVis2 <-orderedheat(abs(IntCorList[[1]]), order="both", simMat = TRUE, merge = 1)
 IntCorVis2
 
-  test <- sapply(1:50, function(n) mean(abs(IntCorList[[n]]))) %>% data.frame(value=., NodeID= NodeIDs)  
+  MeanAbsCor <- sapply(1:50, function(n) mean(abs(IntCorList[[n]]))) %>% data.frame(value=., NodeID= NodeIDs)  
   
-  ggplot(test, aes(x= value)) + geom_density(fill="steelblue", alpha =0.7) +
-    labs(title= "Within node absolute correllation across", 
+  ggplot(MeanAbsCor, aes(x= value)) + geom_density(fill="steelblue", alpha =0.7) +
+    labs(title= "Mean absolute correlation for 50 nodes with themselves", 
          x= "Mean absolute Corellation" )
-
-
-  cleandata[,2] %>%filter(hours(Date.Time) == 1600)
+  setwd(file.path(Figures, "Results"))    
+  ggsave("MeanAbsCorr.pdf")
   
-  
-  test <- IntCor %>% filter(NodeID ==1010) 
-
-  ggplot(test,aes(x = Date, y=`21:00`)) +geom_point()
-    ggplot(test,aes(x=`16:0`)) +geom_density()
-
-    cor(test$`18:30`[-243],test$`18:30`[-1])
-
-test2 <-    test %>%select(`18:30`, Date)
-   
-acf(test2$`18:30`) 
-
-acf(rep(1,100)+rnorm(100,0,0.1))
-
-acf(rnorm(100,0,10))
-
 ```
 
 
