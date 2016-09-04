@@ -281,6 +281,7 @@ cleandata <- cleandata[(lowertimepercs>0.9|MissingDays), c(TRUE,lowermeterpercs 
 ncol(cleandata)*nrow(cleandata)/size #amount of remaingin data
 
 saveRDS(cleandata, "cleandata.rds")
+#cleandata <-readRDS("cleandata.rds")
 ```
 
 The result of cleaning both the cluster is that only minor smart meter removal specific removal needs to take place after the time periods have been cleaned up. This suggests that within the clusters data quality is strongly related related to time period and not to smart meter.
@@ -299,12 +300,24 @@ table(fulldays$total)
 how many days have date 1 day before and 7 days before?
 ```{r}
 weekdiff <- fulldays$Date.Time -ddays(7)
-sum(weekdiff %in% fulldays$Date.Time) #233 days
+sum(weekdiff %in% fulldays$Date.Time) #239 days
 
 weekdiff <- fulldays$Date.Time -ddays(1)
 sum(weekdiff %in% fulldays$Date.Time) #239 days
 
 sum(is.na(cleandata))
+
+sum(is.na(cleandata))/size
+
+#The missingness of the days that have been included even though they don't make the cut.
+day1<- cleandata %>% filter(as.Date(Date.Time)==ymd("2011-06-29")) %>%is.na %>% sum
+1-day1/(12*5261)
+
+day1<- cleandata %>% filter(as.Date(Date.Time)==ymd("2011-10-31")) %>%is.na %>% sum
+1-day1/(12*5261)
+day1<- cleandata %>% filter(as.Date(Date.Time)==ymd("2011-12-12")) %>%is.na %>% sum
+1-day1/(12*5261)
+
 ```
 
 
@@ -355,6 +368,8 @@ saveRDS(cleandata, file="cleandatafilled.rds")
 
 rm(list= c("NACols","dayhourmin", "i","RowsFromMeanVals", "navect", "meanvals", "colID", "rowIDs", "missingrow"))
 
+
+
 ```
 
 
@@ -395,6 +410,19 @@ IntCorVis2
   setwd(file.path(Figures, "Results"))    
   ggsave("MeanAbsCorr.pdf")
   
+  
+  #Distribution of the data
+  
+cleandata %>% gather(. , key=SMartID, value=kWh, -Date.Time) %>%
+  ggplot(., aes(x=kWh)) + geom_density(fill="steelblue", alpha =0.7) + ggtitle("Distribution of energy consumption")
+ggsave("energydensity.pdf")
+  
+cleandata %>% gather(. , key=SMartID, value=kWh, -Date.Time) %>%
+  ggplot(., aes(x=log10(kWh))) + geom_density(fill="steelblue", alpha =0.7) + ggtitle("Distribution of energy consumption")
+  setwd(file.path(Figures, "Appendix")) 
+ggsave("logenergydensity.pdf")
+
+
 ```
 
 
@@ -572,7 +600,7 @@ print(paste("graph", i, "of iteration", n))
 rm(g)
 setwd(SubDataSets)
 saveRDS(DataVsER, "DataVsER.rds")
-
+#DataVsER<- readRDS("DataVsER.rds")
 #find the average number of valid rows
 pairtTtest <-bind_rows(data.frame(nodes= DataVsER[,-c(1:2)] %>%
                        rowMeans(),cutoff=seq(0.1,1,0.05), type="ER"),
@@ -591,10 +619,15 @@ t.test(DataVsER[,-c(1:2)] %>%
                        rowMeans(), (nodestats %>% filter(Average=="mean"))$value, paired = TRUE)
 
 
+#There is a bit of a bug, but it shows that there is a significant difference between the two graph types, check for specific n values e.g n<-17
+sapply(1:20, function(n) {
+  t.test(DataVsER[n,-c(1:2)],nodes[n,sample(1:246,20)+1])$p.value
+  })
+
 #conclusion is that there is a clear and significant different between the number of isolated nodes in the data we are using and an ER graph
 
 ggplot(pairtTtest, aes(x=cutoff, y=nodes, colour=type)) +geom_line() +
-  ggtitle("Difference betwerr ER and smartmeter non-isolated nodes")
+  ggtitle("Difference between ER and smartmeter non-isolated nodes")
 setwd(file.path(Figures,"Method"))
 ggsave("DataVsER.pdf")
 ```
@@ -770,7 +803,7 @@ files <- list.files()
 
 #The Mclapply version kept crashing so the part is done in single
 
-nodeclustlist <-lapply(files, function(n){
+nodeclustlist <-mclapply(files, function(n){
   graph <- read_graph(n, format="graphml")
   vertices <-data.frame(NodeID= V(graph)$name, 
                       cluster=
@@ -780,7 +813,7 @@ nodeclustlist <-lapply(files, function(n){
   mutate(NodeID= as.character(NodeID))
   print(paste("file:", n," date:",  grep(n, files)))
   vertices
-}
+}, mc.cores = detectCores()
 )
 
 
@@ -1143,12 +1176,15 @@ chi2indep.empirical(nodeclust2[,-1])
 #takes a long time
 chisq.test(nodeclust2[,-1], simulate.p.value = TRUE) 
 
+#This needs to be created 
 mi.empirical(Clusttrans[,-1])
 chi2indep.empirical(Clusttrans[,-1])
 
 test <-chisq.test(Clusttrans[,-c(1)]) 
 testratio <- test$observed/test$expected
 testratio[testratio>1.5]<-1.5
+
+chisq.test(nodeclust2[,-1]) 
 
 orderedheat((testratio),order="none", merge=1, mid = 1, legend="Ratio")+labs(title="Ratio of observed to expected node counts", x= "Cluster", y= "Cluster")+
   scale_x_continuous(breaks = 1:8, 
@@ -1177,8 +1213,11 @@ noentropy<- nodeclust2 %>%
   spread(., key=ClustID, value=times) %>%select(-node) %>%
   summarise_each(funs(sum)) %>% t %>% entropy()
 
+#test whether there is a significant difference between the entropy and the marginal entropy of the clusters
+t.test(x=NodeEntropy$entropy, alternative="less", mu =noentropy)
+
 ggplot(NodeEntropy, aes(x=entropy)) +geom_density( fill="steelblue", alpha =0.7) +
-  ggtitle("Density plot of Entropy") + xlab("Entropy")+geom_vline(aes(xintercept=noentropy, colour="red"))+theme(legend.position="none") 
+  ggtitle("Density plot of Entropy") + xlab("Entropy")+geom_vline(aes(xintercept=noentropy, colour="red"))+ geom_vline(aes(xintercept=mean(NodeEntropy$entropy), colour="green"))+theme(legend.position="none") 
 ggsave("stabilitydens.pdf")
 
  
@@ -1822,7 +1861,7 @@ modcom <-  bind_cols(TransMod, LinearMod)
 names(modcom) <- c("TransMod", "LinearMod")
 
 setwd(TexTables)
-modcom %>% mutate(type= c("RMSE", "R^2", "mape")) %>% 
+modcom %>% mutate(type= c("RMSE", "R^2", "MAPE")) %>% 
   gather(., key="model", value= "score", -type ) %>%
   spread(., key=model, value=score) %>%
   xtable(., caption="Performance metrics for the two model types",
@@ -1852,7 +1891,25 @@ sameclusts <- sapply(2:(ncol(NodeClust2)-1), function(n){
     }
 )
 
-which(c(FALSE, sameclusts))
+which(c(FALSE, sameclusts)) %>% length
+
+names(NodeClust2[,which(c(FALSE, sameclusts))])
+
+setwd(TexTables)
+data.frame(`First Pair` =names(NodeClust2[,c(sameclusts, FALSE)]),
+           `Matching Pair` =names(NodeClust2[,c(FALSE, sameclusts)])) %>%
+  xtable(., caption="Day pairs with matching clusters",
+       label = "tab:DayPairs") %>% 
+  print(., type="latex",tabular.environment="longtable", file="DayPairs.tex")
+
+
+smarttable <-names(nodeclust2)[-1] %>% sub("X", "", .)%>% as.integer %>% .[order(.)]%>% matrix(., ncol=10, byrow=TRUE) %>% as.data.frame %>%
+  xtable(., caption="Smart meter ID's used in the project",
+       label = "tab:SMARTID") 
+align(smarttable) <- "|r|rrrrrrrrrr|"
+
+  print(smarttable, type="latex",tabular.environment="longtable", file="SMARTID.tex", floating =FALSE)
+
 
 #days 18, 19, 20  has all 8 clusters
            NodeClust2[,23] %>% unique 
@@ -2029,6 +2086,8 @@ ggsave("XGboostresults.pdf")
 
 
 Clean data daily profiles
+
+Portfolio load and distributions
 ```{r portfolio Load}
 
 
@@ -2084,6 +2143,8 @@ NDM %>% group_by(Mosaic.Class, MosaicNumber) %>% summarise(coutns= n())
 
 
 ```{r Node day Cluster}
+setwd(SubDataSets)
+NodeDistrib <- readRDS( "NodeDistrib.rds")
 
 NodeClust2 <- NodeClust
 names(NodeClust2)[-1]<- Clustconversion$UniqueID
