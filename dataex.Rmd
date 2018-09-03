@@ -3,6 +3,8 @@ title: "Exploratory code"
 author: "Jonathan Bourne"
 date: "15 June 2016"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 Note inlcuding apps is ok atm but this could explode into a large amount of data depending on what other apps appear, I still haven't worked out selectively inlcuding sub folders
@@ -42,11 +44,11 @@ GraphPath<-file.path("/home/rstudio", "graphs")
     options(fftempdir = "/home/rstudio")
   } else {
   
-  basewd <- "C:/Users/pc1/Dropbox/Thesis-Data"
+  basewd <- "/home/jonno/Dropbox/Thesis-Data"#"C:/Users/pc1/Dropbox/Thesis-Data"
   Figures <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University-College-London-thesis/Figures")
     TexTables <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University-College-London-thesis/Tables")
-  functioncode <- "C:/Users/pc1/Dropbox/Thesis-Data/SmartMeterThesisCode/Functions"
-  Cormats <- "C:/Users/pc1/Dropbox/Thesis-Data/Cormats"
+  functioncode <- file.path(basewd, "SmartMeterThesisCode/Functions")
+  Cormats <- file.path(basewd, "Cormats")
   }
 
 SubDataSets <- file.path(basewd, "SubDataSets")
@@ -296,6 +298,7 @@ table(fulldays$total)
 
 ```
 
+xxxxxxxxxxxWon't use in new version
 
 how many days have date 1 day before and 7 days before?
 ```{r}
@@ -320,7 +323,7 @@ day1<- cleandata %>% filter(as.Date(Date.Time)==ymd("2011-12-12")) %>%is.na %>% 
 
 ```
 
-
+xxxxxxxxxxxturned into function called FillMissingData
 
 Fill in missing values by day time average, then average by day using a three time period window
 ```{r fill in missing}
@@ -407,7 +410,7 @@ IntCorVis2
   ggplot(MeanAbsCor, aes(x= value)) + geom_density(fill="steelblue", alpha =0.7) +
     labs(title= "Mean absolute correlation for 50 nodes with themselves", 
          x= "Mean absolute Corellation" )
-  setwd(file.path(Figures, "Results"))    
+  setwd(file.path( into functionFigures, "Results"))    
   ggsave("MeanAbsCorr.pdf")
   
   
@@ -427,6 +430,8 @@ ggsave("logenergydensity.pdf")
 
 
 Save each day as a file for making into graphs
+
+xxxxis function SaveAsDay
 ```{r savedaydata}
 
 datevect <- cleandata$Date.Time %>%as.Date() %>% unique
@@ -581,6 +586,8 @@ nodestats2 %>% select(cutoff,Average ,value) %>%
 
 The results of the above analysis suggest that a 0.7 cutoff will be chosen.
 
+
+xxxxwon't use in paper
 ```{r ER vs dataset}
 
 #create a dataframe with the number of required edges and the space for the iterations
@@ -634,6 +641,8 @@ ggsave("DataVsER.pdf")
 
 
 This section shows why I chose the method I did
+
+xxxxxneeded for referring to why I chose them
 ```{r Benchmarking Community Detection}
 
 #why  doesn't cluster detection work on corellation plots?
@@ -795,6 +804,9 @@ summary(nodecount)
 
 Create a cluster Makeup vector
 Take the nodes that make up each vector and construct a vector that includes all nodes and ones where a node is included in the cluster
+
+
+xxxx functions NodeClusterList
 ```{r nodeclustlist}
 
 #Load each graph file and create a list of clust vector matrices
@@ -860,7 +872,7 @@ rm(testmat)
 
 #why is nodeclust list not doing what I would expect?
 testmat2 <-readRDS(list.files()[1]) %>%names()  %>% data.frame(NodeID=as.character(.[-1])%>% 
-  make.names) %>%mutate(NodeID = as.character(NodeID))
+  make.names) %>% mutate(NodeID = as.character(NodeID))
 
 #names(NodeClust)[-1]<-make.names(1:ncol(NodeClust[,-1])) #give them all unique names
 
@@ -1005,7 +1017,7 @@ fc <- fastgreedy.community(Clustergraph)
   vcount(Clustergraph)
 ```
 
-
+#the bit that actually makes the clusters
 
 ```{r Conversion ClustID}
 

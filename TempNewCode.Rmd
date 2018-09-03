@@ -1,0 +1,222 @@
+---
+title: "Untitled"
+author: "Jonathan Bourne"
+date: "24 August 2018"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r}
+This is blocked out I will add additional packages as necessary
+#packages <-c("stringr", "lubridate", "data.table","caret", "xgboost","e1071", "R.utils", "corrplot", "Hmisc", "Amelia", "Matrix", "ff", "ggdendro", "zoo", "networkD3", "igraph","parallel", "magrittr", "ggplot2", "tidyr", "xtable","entropy","dplyr", "microbenchmark", "FeatureHashing")
+
+
+packages <- c("tidyverse", "stringr", "readr", "zoo", "lubridate")
+
+new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+sapply(packages, library, character.only = TRUE)
+rm(list=c("packages",  "new.packages"))
+
+
+
+
+setwd(file.path("/home/jonno/SmartMeterThesisCode/Functions"))
+list.files() %>% map(source)
+
+
+list.files("/home/jonno/SmartRtimes/Functions", full.names = T) %>% map(source)
+
+```
+
+
+
+```{r}
+  basewd <- "/home/jonno/Dropbox/Thesis-Data"#"C:/Users/pc1/Dropbox/Thesis-Data"
+  functioncode <- file.path(basewd, "SmartMeterThesisCode/Functions")
+  Cormats <- file.path(basewd, "Cormats")
+#These need to be added when necessary
+  #Figures <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University-College-London-thesis/Figures")
+ #TexTables <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University-College-London-thesis/Tables")
+  
+  SubDataSets <- file.path(basewd, "SubDataSets")
+datafile <- file.path(basewd, "TCa1")
+daytimeseries <-file.path(basewd,"Cleandata")
+  
+```
+
+The TC1a file is 25 gb and so needs to be broken up into smaller chunks
+
+We will use the smartRtimes functions to do this
+
+##set up functions
+```{r}
+Conv_and_filter <- substitute( 
+  x %>% mutate(`Location ID` = as.character(`Location ID`)) %>%
+    left_join(., mutate(TimeZoneDF, 
+                        `Location ID` = as.character(`Location ID`)), 
+              by= "Location ID") %>% 
+    ConvertToTime(., "Date and Time of capture") %>% #Convert the time column to time class
+  FilterTime(.,"Date and Time of capture", Start = 16, End = 21)
+  )
+
+
+#Loads the timezone data into a data frame
+TimeZoneDF <- read.csv(file.path("/home/jonno/TC1a","HalfHourlyDataSource.csv"), check.names = FALSE) %>% mutate(TimeZoneCol = ifelse(`Data provider` == "Logica",
+                                              "GMT",
+                                              "Europe/London")) %>%
+  select(-`Data provider`)
+```
+
+#open and save a large number of RDS to the hardrive so  as to split up the csv.
+
+The data is shrunk as all the buts outside the target time are removed
+```{r}
+#This takes a while...
+SaveManyCSV(file.path("/home/jonno/TC1a","TrialMonitoringDataHH.csv"), 
+            file.path("/media/jonno/Seagate Expansion Drive/Msc-Thesis-Data", "TC1aRDS"),
+            1e+6,
+            Conv_and_filter)
+
+
+test <- read.csv(file.path("/home/jonno/TC1a","TrialMonitoringDataHH.csv")) 
+```
+
+#Choose target timeperiod
+
+```{r}
+
+```
+
+
+##Fill missing
+
+```{r}
+
+```
+
+
+#Break into days
+
+```{r}
+
+```
+
+#Create correlation matrices
+```{r}
+
+```
+
+#Choose edge corellation
+
+```{r}
+
+```
+
+#Create graphs and cluster
+```{r}
+
+```
+
+
+##Choose clustering algorithm
+In the code thiss done after the actual graphs are created but just demonstrates why I chose the algo I did
+
+```{r}
+setwd(Cormats)
+n <- 10
+filevect <- sample(list.files(),30)
+
+    graph2 <- readRDS(filevect[n])
+    graph2 <-createcleangraph2(graph2, graph2>0.7 )
+
+    fc <-fastgreedy.community(graph2)
+    wc <-walktrap.community(graph2)
+    ic <- infomap.community(graph2)
+    lc <- cluster_louvain(graph2)
+    
+    modularity(fc)
+    modularity(wc)
+    modularity(ic)
+    modularity(lc)
+    
+    membership(wc) %>% unique 
+    membership(fc) %>% unique 
+    membership(ic) %>% unique 
+  
+setwd(GraphPath)
+graphvect <- sample(list.files(),30)
+
+CommTimes<-mclapply(1:30, function(n){
+    graph <- read.graph(graphvect[n], format = "graphml")  
+
+    fc <-fastgreedy.community(graph)
+    wc <-walktrap.community(graph)
+    ic <- infomap.community(graph)
+    lc <- cluster_louvain(graph)
+    mod<- data.frame( 
+      Fastgreedy= modularity(fc),
+      Walktrap= modularity(wc),
+      Infomap = modularity(ic),
+      Louvain =modularity(lc))
+    },
+    mc.cores=detectCores()
+
+)%>% bind_rows()  
+  
+CommTimes <- CommTimes %>% gather(., key= Method, value= Modularity) %>% 
+  mutate(Method= factor(Method, 
+                          labels = c("Fastgreedy", 
+                                   "Infomap",
+                                   "Louvain",
+                                     "Walktrap" 
+                                   ))
+  )
+
+CommTimes %>% ggplot(., aes(x=Method, y=Modularity, fill= Method)) + geom_boxplot() +theme(legend.position="none") +
+  ggtitle("Modularity results for different\n Community detection Algorithms")+
+   scale_color_manual(values= ggplotColours(4), guide=FALSE)
+
+setwd(GraphPath)
+graph <- read.graph(graphvect[1], format = "graphml")  
+bench <- microbenchmark(    fc <-fastgreedy.community(graph),
+            wc <-walktrap.community(graph),
+            ic <- infomap.community(graph),
+            lc <- cluster_louvain(graph),
+             times = 30)
+
+bench <-bench %>% rename(Method=expr) %>% 
+  mutate(time=(time)/1*10^-9, Method= factor(Method, 
+                          levels= levels(Method)[order(levels(Method))],
+                          labels = c("Fastgreedy", 
+                                   "Infomap",
+                                   "Louvain",
+                                     "Walktrap" 
+                                   )
+                          )
+         ) 
+
+
+bench %>% ggplot(., aes(x=Method, y=time, fill= Method)) + geom_boxplot() +theme(legend.position="none") +
+  labs(title= "Benchmarking Algorithm run time", y="Run time in seconds") +
+  scale_color_manual(values= ggplotColours(4), guide=FALSE)
+setwd(file.path(Figures, "Results"))
+
+rm(list = "CommTimes", "graph", "bench")
+```
+
+#Assign Cluster Family ID
+
+Needs NodesClust, ClusterConversion NodeClusterList, clusterprofile
+
+functions
+MakeClusterProfile, NodeClusterLists
+
+```{r}
+
+```
+
+
