@@ -10,7 +10,7 @@ FillMissingData <- function(df){
   
   meanvals <- df[,-1] %>%
     mutate(time.day = dayhourmin) %>% group_by(time.day) %>%
-    summarise_each(funs(mean(., na.rm=TRUE))) %>%ungroup
+    summarise_all(funs(mean(., na.rm=TRUE))) %>%ungroup
   
   navect <- df %>% is.na %>% which(., arr.ind=T)
   

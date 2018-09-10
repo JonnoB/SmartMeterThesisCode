@@ -31,18 +31,25 @@ CreateAllCormats <- function(SourceFolder, TargetFolder, parallel.mode= FALSE ){
   } else {
     
     for (i in 1:length(files)){
+      
       setwd(SourceFolder)
       file <- files[i]
-      datdat<-readRDS(file) %>%ungroup
-      meterIDs <- names(datdat)[-1]
-      print("Data Loaded")
-      weightmat <- datdat[,2:ncol(datdat)] %>% 
-        as.matrix %>% cor
-      diag(weightmat) <- 0
-      setwd(TargetFolder)  
-      saveRDS(weightmat, paste(file,".rds",sep=""))
-      print(paste(i,"of",length(files))) 
-      gc()
+      
+      if(file.exists(file.path(TargetFolder,paste(file,".rds",sep="")))){
+        print(paste("day", i,"file found proceeding to next day"))
+      }else{
+
+        datdat<-readRDS(file) %>%ungroup
+        meterIDs <- names(datdat)[-1]
+        print("Data Loaded")
+        weightmat <- datdat[,2:ncol(datdat)] %>%
+          as.matrix %>% cor
+        diag(weightmat) <- 0
+        setwd(TargetFolder)  
+        saveRDS(weightmat, paste(file,".rds",sep=""))
+        print(paste(i,"of",length(files))) 
+        gc()
+      }
     }
     
     

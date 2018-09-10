@@ -7,13 +7,18 @@ editor_options:
   chunk_output_type: console
 ---
 
+#new correlation package useful for this work
+https://drsimonj.svbtle.com/exploring-correlations-in-r-with-corrr
+
+#setup block
 
 ```{r}
-This is blocked out I will add additional packages as necessary
+#This is blocked out I will add additional packages as necessary
 #packages <-c("stringr", "lubridate", "data.table","caret", "xgboost","e1071", "R.utils", "corrplot", "Hmisc", "Amelia", "Matrix", "ff", "ggdendro", "zoo", "networkD3", "igraph","parallel", "magrittr", "ggplot2", "tidyr", "xtable","entropy","dplyr", "microbenchmark", "FeatureHashing")
 
 
-packages <- c("tidyverse", "stringr", "readr", "zoo", "lubridate")
+packages <- c("tidyverse", "stringr", "readr", "zoo", "lubridate", "data.table", "ff", "igraph", "microbenchmark")
+#file.path("/media/jonno/Seagate Expansion Drive/Msc-Thesis-Data/Cormats")
 
 new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
 if(length(new.packages)) install.packages(new.packages)
@@ -21,73 +26,123 @@ if(length(new.packages)) install.packages(new.packages)
 sapply(packages, library, character.only = TRUE)
 rm(list=c("packages",  "new.packages"))
 
+select <- dplyr::select
 
 
+rootwd <-getwd()
+DropboxPath <- file.path(rootwd, "Dropbox")
+MScThesis <-file.path(DropboxPath, "MScThesis")
+figurespath <- file.path(MsCThesis, "Figures")
+ZipData <- file.path(rootwd, "Dropbox", "MScThesis")
+daytimeseries <- file.path(MScThesis, "DayTimeSeries")
+GraphPath <- file.path("/media/jonno/Seagate Expansion Drive/Msc-Thesis-Data/Graphs/WholeDay")
+GraphFolder <- file.path("/media/jonno/Seagate Expansion Drive/Msc-Thesis-Data/Graphs")
 
-setwd(file.path("/home/jonno/SmartMeterThesisCode/Functions"))
-list.files() %>% map(source)
+library("RStudioAMI")
+includeSyncDropbox("BigHeat")
+#excludeSyncDropbox("BigHeat")
 
-
-list.files("/home/jonno/SmartRtimes/Functions", full.names = T) %>% map(source)
+list.files(file.path(DropboxPath,"SmartMeterThesisCode/Functions"), full.names = T) %>% map(~{source(.x)})
+list.files(file.path(DropboxPath, "SmartRtimes/Functions"), full.names = T) %>% map(~{source(.x)})
+list.files(file.path(DropboxPath, "BigHeat/Functions"), full.names = T) %>% map(~{source(.x)})
 
 ```
 
 
 
 ```{r}
+
+
   basewd <- "/home/jonno/Dropbox/Thesis-Data"#"C:/Users/pc1/Dropbox/Thesis-Data"
-  functioncode <- file.path(basewd, "SmartMeterThesisCode/Functions")
-  Cormats <- file.path(basewd, "Cormats")
+
 #These need to be added when necessary
   #Figures <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University-College-London-thesis/Figures")
  #TexTables <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University-College-London-thesis/Tables")
   
   SubDataSets <- file.path(basewd, "SubDataSets")
 datafile <- file.path(basewd, "TCa1")
-daytimeseries <-file.path(basewd,"Cleandata")
+
   
 ```
 
-The TC1a file is 25 gb and so needs to be broken up into smaller chunks
+#Load the data
 
-We will use the smartRtimes functions to do this
-
-##set up functions
+It takes a long time to load and a long time to convert to time. 10.1 gb at max about 2.7 after spreading
 ```{r}
-Conv_and_filter <- substitute( 
-  x %>% mutate(`Location ID` = as.character(`Location ID`)) %>%
-    left_join(., mutate(TimeZoneDF, 
-                        `Location ID` = as.character(`Location ID`)), 
-              by= "Location ID") %>% 
-    ConvertToTime(., "Date and Time of capture") %>% #Convert the time column to time class
-  FilterTime(.,"Date and Time of capture", Start = 16, End = 21)
-  )
+if(!file.exists("smartmeterdata.rds")){
+#Decompress is necessary
+if(!file.exists("TC1a")){
+  print("Decompressing file")
+  decompress_file(ZipData, "TC1a.zip",rootwd)
+}
+smartdata <- LoadAllSmartMeterData(SmartMeterPath = file.path("TC1a", "TrialMonitoringDataHH.csv"), 
+                                   TimeZonePath= file.path("TC1a","HalfHourlyDataSource.csv"))
+
+smartdata <- dcast(smartdata, Date.Time ~`Location ID`,
+                     value.var = "Parameter",
+                     drop=FALSE)
+
+saveRDS(smartdata, "smartmeterdata.rds")
+}else{
+  print("Loading smartmeter data")
+  smartdata<- readRDS("smartmeterdata.rds")
+}
 
 
-#Loads the timezone data into a data frame
-TimeZoneDF <- read.csv(file.path("/home/jonno/TC1a","HalfHourlyDataSource.csv"), check.names = FALSE) %>% mutate(TimeZoneCol = ifelse(`Data provider` == "Logica",
-                                              "GMT",
-                                              "Europe/London")) %>%
-  select(-`Data provider`)
+
 ```
 
-#open and save a large number of RDS to the hardrive so  as to split up the csv.
-
-The data is shrunk as all the buts outside the target time are removed
+##Visualise the NAs
 ```{r}
-#This takes a while...
-SaveManyCSV(file.path("/home/jonno/TC1a","TrialMonitoringDataHH.csv"), 
-            file.path("/media/jonno/Seagate Expansion Drive/Msc-Thesis-Data", "TC1aRDS"),
-            1e+6,
-            Conv_and_filter)
+isnaframe <- 1-is.na(smartdata[,-1])*1
 
+#How much data is missing as a percentage of total
+1-sum(isnaframe)/(ncol(isnaframe)*nrow(isnaframe))
 
-test <- read.csv(file.path("/home/jonno/TC1a","TrialMonitoringDataHH.csv")) 
+if(file.exists("isnaordering.rds")){
+ordering <- createorder(isnaframe, order="column", simMat= FALSE,xblocks=15, yblocks=15, par=FALSE)
+saveRDS(ordering,"isnaordering.rds")
+}else{
+  ordering <- readRDS("isnaordering.rds")
+}
+
+IsNaordered <- bigheat(t(isnaframe[,ordering$Colorder]), #transposed so that time is on the x-axis
+                mergex = 25, mergey = 5, mid=0.5, legend="Percent Valid")
+
+IsNaordered+
+    labs(x = "Date time",
+         y = "Smartmeter ID") + ggtitle("Missing data pre-cleaning")
+ggsave(file.path(figurespath, "Precleaningmissing.pdf"))
+
 ```
+
+
 
 #Choose target timeperiod
 
+the days that will be included in the analysis
+
 ```{r}
+findbreak<- t(isnaframe[, ordering$Colorder]) %>% as.data.frame %>%
+  mutate(rowsum = rowSums(.)/nrow(isnaframe), 
+         diff= lag(rowsum,1), 
+         rowID= 1:nrow(.), 
+         rM=(rowsum + lag(rowsum)+lead(rowsum))/3) %>% 
+  select(rowsum, diff, rowID, rM)
+
+ggplot(findbreak, aes(x = rowID, y = rowsum)) + geom_line() +
+  ggtitle("Identifying break points in the smartmeter clusters") +
+  labs(x="Cluster ordered meter IDs", y = "Percent of valid data points")+ 
+  scale_y_continuous(labels = scales::percent)
+ggsave(file.path(figurespath, "breakpoints.pdf"))
+
+findbreak %>%
+  filter(rowID>1650, rowID<6100, rowsum>0.9) %>%
+ggplot(., aes(x = rowID, y = rowsum)) + geom_line() 
+
+#Only take data from the big central block of high quality smartmeters that have at least 90\% valid data.
+HighQualitySmartMeters <- findbreak %>%
+  filter(rowID>1650, rowID<6100, rowsum>0.9)
 
 ```
 
@@ -95,29 +150,127 @@ test <- read.csv(file.path("/home/jonno/TC1a","TrialMonitoringDataHH.csv"))
 ##Fill missing
 
 ```{r}
+cleandata<- smartdata[,ordering$Colorder[HighQualitySmartMeters$rowID]] %>%
+  FillMissingData() %>%
+  select(Date.Time, everything())
+
+
+#there are few coloumns that still have na's
+table(colSums(is.na(cleandata)))
+#we remove them here
+cleandata <- cleandata[,colSums(is.na(cleandata))==0] 
+sum(is.na(cleandata))
+
+#One column has gone bonkers I will remove it for simplicity
+test <- cleandata[,2] %>% as.numeric()
+cleandata[,2][which(is.na(test))]
+
+
+cleandata <- cleandata[,-2] %>%
+  filter(date(Date.Time) != ymd("2011-04-30")) #this date only has two time periods and so needs to be removed
+
+saveRDS(cleandata, file ="cleandatafilled.rds")
+
+SaveAsDay(cleandata, daytimeseries)
+
+
 
 ```
 
 
-#Break into days
-
+##Calculate internal corellation
 ```{r}
+set.seed(1238)
+NodeIDs <- sample(1:(ncol(cleandata)-1), 50)+1
+IntCor <- cleandata[,c(1,NodeIDs)] %>%
+  mutate(Time = paste(hour(cleandata$Date.Time),
+                    minute(cleandata$Date.Time),
+                    sep=":"),
+         Date = as.Date(Date.Time)
+)%>%  gather(key = NodeID, value = kwh, 
+             -Date.Time, 
+             -Time,
+             -Date) %>% select(-Date.Time) %>%
+  spread(key= Time, value=kwh)
+
+IntCorList <- map(unique(IntCor$NodeID), ~{
+  
+  IntCor %>% filter(NodeID ==.x) %>% select(-NodeID, -Date) %>%
+    t %>%
+    cor
+  })
+
 
 ```
 
-#Create correlation matrices
-```{r}
+#Split point
 
-```
+Everything above this point is common data processing. Below this point the processing is dependent on the time of day to be analyzed
 
 #Choose edge corellation
 
+
 ```{r}
+#calculates information about the best cutoff point to choose 
+TimePeriods <- data_frame(Start = c("00:00:00", "00:00:00", "03:00:00", "09:00:00", "15:00:00", "18:00:00" ),
+           End= c("24:00:00", "06:00:00", "09:00:00", "15:00:00", "21:00:00", "24:00:00" ))
+
+TimePeriods <- data_frame(Start = c("00:00:00","00:00:00","12:00:00", "00:00:00", "06:00:00", "12:00:00", "18:00:00" ),
+           End= c("24:00:00", "12:00:00","24:00:00","06:00:00", "12:00:00", "18:00:00", "24:00:00" ))
+
+TimeAnalysis <- (1:nrow(TimePeriods)) %>%
+  map_df(~{
+    
+    periodchar <-paste(TimePeriods$Start[.x], TimePeriods$End[.x], sep = "-")
+    print(periodchar)
+    GetCutoffReduction(StartTime = TimePeriods$Start[.x], EndTIme = TimePeriods$End[.x], samples = 30) %>%
+      mutate(period = periodchar)
+    
+  })
+
+#saveRDS(TimeAnalysis, file.path(MScThesis, "TimeAnalysis.rds"))
+#TimeAnalysis <- readRDS(file.path(MScThesis, "TimeAnalysis.rds"))
+
+CutoffDiff  <- TimeAnalysis %>%
+  select(type, period, cutoff, value) %>%
+  spread(key = type, value) %>%
+  mutate(diff = nodes-edges) 
+
+#maximum difference by period
+CutoffDiff %>%
+  group_by(period) %>%
+  filter(diff == max(diff))
+
+
+CutoffDiff %>%
+  ggplot(aes(x = cutoff, y = diff, colour = period)) + geom_line() +   
+  scale_y_continuous(labels = scales::percent)
 
 ```
 
+
+#Create all graphs using the cutoffs previously selected
+
 #Create graphs and cluster
 ```{r}
+TimePeriods2 <- TimePeriods %>% arrange(paste(Start, End, sep = "-")) %>%
+  mutate(cutoff = CutoffDiff %>%
+  group_by(period) %>%
+  filter(diff == max(diff)) %>% pull(cutoff),
+  folder = c(NA, "WholeDay", "Morning", "Midday", "Evening", NA)) %>%
+  filter(!is.na(folder)) %>% .[-1,]
+
+1:nrow(TimePeriods2) %>% walk(~{
+  
+CreateAllGraphs2(SourceFolder = daytimeseries, 
+                 TargetFolder = file.path(GraphFolder, TimePeriods2$folder[.x]),
+                 cutoff = TimePeriods2$cutoff[.x]-0.05,
+                 StartTime = TimePeriods2$Start[.x],
+                 EndTIme = TimePeriods2$End[.x])
+
+})
+
+rm(TimePeriods2)
 
 ```
 
@@ -125,34 +278,17 @@ test <- read.csv(file.path("/home/jonno/TC1a","TrialMonitoringDataHH.csv"))
 ##Choose clustering algorithm
 In the code thiss done after the actual graphs are created but just demonstrates why I chose the algo I did
 
+The results of the chunk show that all the methods have a similar modularity, Louvain is slightly higher, but that the Louvain method is considerably faster
+
 ```{r}
 setwd(Cormats)
-n <- 10
-filevect <- sample(list.files(),30)
 
-    graph2 <- readRDS(filevect[n])
-    graph2 <-createcleangraph2(graph2, graph2>0.7 )
-
-    fc <-fastgreedy.community(graph2)
-    wc <-walktrap.community(graph2)
-    ic <- infomap.community(graph2)
-    lc <- cluster_louvain(graph2)
-    
-    modularity(fc)
-    modularity(wc)
-    modularity(ic)
-    modularity(lc)
-    
-    membership(wc) %>% unique 
-    membership(fc) %>% unique 
-    membership(ic) %>% unique 
-  
 setwd(GraphPath)
 graphvect <- sample(list.files(),30)
 
-CommTimes<-mclapply(1:30, function(n){
+CommTimes<-lapply(1:30, function(n){
     graph <- read.graph(graphvect[n], format = "graphml")  
-
+    print(n)
     fc <-fastgreedy.community(graph)
     wc <-walktrap.community(graph)
     ic <- infomap.community(graph)
@@ -162,8 +298,7 @@ CommTimes<-mclapply(1:30, function(n){
       Walktrap= modularity(wc),
       Infomap = modularity(ic),
       Louvain =modularity(lc))
-    },
-    mc.cores=detectCores()
+    }
 
 )%>% bind_rows()  
   
@@ -203,7 +338,7 @@ bench <-bench %>% rename(Method=expr) %>%
 bench %>% ggplot(., aes(x=Method, y=time, fill= Method)) + geom_boxplot() +theme(legend.position="none") +
   labs(title= "Benchmarking Algorithm run time", y="Run time in seconds") +
   scale_color_manual(values= ggplotColours(4), guide=FALSE)
-setwd(file.path(Figures, "Results"))
+
 
 rm(list = "CommTimes", "graph", "bench")
 ```
@@ -216,6 +351,30 @@ functions
 MakeClusterProfile, NodeClusterLists
 
 ```{r}
+#creates a list of which node is part of which day cluster
+nodeclustlist <- NodeClusterList(GraphPath)
+
+dayorder <- names(nodeclustlist) %>% ymd
+
+#creates the table that gives the number of nodes per cluster, and gives each cluster a unique ID across all the days
+Clustconversion <- 1:length(nodeclustlist) %>%
+  map_df(~{
+  nodeclustlist[[.x]] %>%
+  group_by(cluster) %>%
+  summarise(NodesInCluster= n()) %>% 
+  mutate(day=.x, 
+         date=dayorder[.x],
+         IntraDayRank=rank(-(NodesInCluster), ties.method="random"))
+  }) %>%
+   mutate(UniqueID = 1:nrow(.) %>% make.names)
+
+rm(dayorder)
+
+clusterprofile <- CreateAllProfiles(Clustconversion, daytimeseries, nodeclustlist)
+
+Clustergraph <- CreateClusterGraph(Clustconversion, clusterprofile, clustercutoff = 50, edgecutoff = 0.65)
+
+
 
 ```
 

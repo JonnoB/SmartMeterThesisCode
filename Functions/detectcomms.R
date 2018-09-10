@@ -8,7 +8,7 @@ detectcomms <- function(graph){
   community$community_conv <-1:nrow(community)
   community$community_conv[community$community_conv>5] <-6
   
-  community %<>% left_join(., data.frame(community_conv = 1:6, shades =rainbow(6)), by="community_conv")
+  community <- community %>% left_join(., data.frame(community_conv = 1:6, shades =rainbow(6)), by="community_conv")
   
   #colour by community
   V(graph)$color <- community$shades[match(membership(fc) ,

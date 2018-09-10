@@ -554,7 +554,6 @@ nodestats %>% filter(Average== "mean") %>% ggplot(., aes(x=cutoff)) +
   ggtitle("Mean number of Nodes and variance")
 ggsave("Meannodes.pdf")
 
-
 #make plot that combines edges and nodes as a percent
 
 edgestats2 <- edgestats %>% mutate(Average= paste("Edge", Average),
@@ -888,7 +887,7 @@ setwd(SubDataSets)
 nodeclustlist <- readRDS("nodeclustlist.rds")
 
 #get day order from the nodeclustlist object
-dayorder <- names(nodeclustlist)%>%ymd
+dayorder <- names(nodeclustlist) %>% ymd
 
 Clustconversion <-lapply(1:length(nodeclustlist), function(n){
       day <-data.frame(oldClustID=nodeclustlist[[n]][,-1] %>%
@@ -898,7 +897,7 @@ Clustconversion <-lapply(1:length(nodeclustlist), function(n){
            IntraDayRank=rank(-(NodesInCluster),ties.method="random"))
       day
       } 
-    ) %>%bind_rows %>% mutate(UniqueID = 1:nrow(.)%>%make.names)
+    ) %>% bind_rows %>% mutate(UniqueID = 1:nrow(.) %>% make.names)
 
 rm(dayorder)
 
@@ -996,7 +995,7 @@ setwd(file.path(Figures,"Results"))
 ggsave("ClusterCorLoadLarge.png")
 
 ClustComms2[is.na(ClustComms2)]<-0
-Clustergraph <- createcleangraph2(ClustComms2, ClustComms2 >0.85)
+Clustergraph <- createcleangraph2(ClustComms2, ClustComms2 >0.65)
       print("Graph created")
       Clustergraph <-detectcomms(Clustergraph)
       print("Clusters detected")
@@ -1025,7 +1024,10 @@ UniqueClusters<- data.frame(UniqueID= V(Clustergraph)$name ,
                       ClustID= get.vertex.attribute(Clustergraph, name = "ClusterID"),
                       stringsAsFactors =FALSE)
 
-Clustconversion <- Clustconversion%>% 
+UniqueClusters$UniqueID %>% unique %>% length
+UniqueClusters$ClustID %>% unique %>% length
+
+Clustconversion2 <- Clustconversion %>% 
   left_join(.,UniqueClusters, by="UniqueID") %>%
   mutate(ClustID= ifelse(is.na(ClustID),"soup",ClustID))
 
@@ -1046,7 +1048,8 @@ rm(list=c("UniqueClusters", "LargeClusts"))
 
 
     Clustsperday<-  Clustconversion %>% group_by(ClustID, date) %>% 
-        summarise(Occurances=n())%>% ungroup %>%
+        summarise(Occurances=n())%>% ungroup 
+    %>%
         spread(., date,value=Occurances, fill=0)
 
     orderedheat((t(Clustsperday[,-1])>0)*1, merge=1)      
