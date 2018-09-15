@@ -846,9 +846,9 @@ test %>% sapply(., function(n) unique(n) %>% length) %>% summary
 setwd(daytimeseries)
 
 #as all the nodes are inlcuded any day can be used
-NodeClust<- readRDS(list.files()[1]) %>%names() 
+NodeClust <- readRDS(list.files()[1]) %>%names() 
 
-NodeClust<- data.frame(NodeID=as.character(NodeClust[-1])%>% 
+NodeClust <- data.frame(NodeID=as.character(NodeClust[-1])%>% 
   make.names) %>%mutate(NodeID = as.character(NodeID)) %>% arrange(NodeID)
 
 #check NodeClust and Nodeclustlist are in the same order
@@ -1027,7 +1027,7 @@ UniqueClusters<- data.frame(UniqueID= V(Clustergraph)$name ,
 UniqueClusters$UniqueID %>% unique %>% length
 UniqueClusters$ClustID %>% unique %>% length
 
-Clustconversion2 <- Clustconversion %>% 
+Clustconversion <- Clustconversion %>% 
   left_join(.,UniqueClusters, by="UniqueID") %>%
   mutate(ClustID= ifelse(is.na(ClustID),"soup",ClustID))
 
@@ -1291,7 +1291,7 @@ ggsave("TotalClusters.pdf")
 
 
 
-
+#create transfer matrix
 Find the counts of nodes transfering from one cluster to another across each turn by finding the the turnwise A*B matrix for the clusters in adjacent turns, add the results of that matrix multiplication to a matrix that contains all clusters
 
 ```{r Transition}

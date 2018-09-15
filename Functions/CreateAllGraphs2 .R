@@ -15,6 +15,12 @@ CreateAllGraphs2 <- function(SourceFolder, TargetFolder,cutoff=0.7,  StartTime =
   if(is.na(files[1])) {
     files <-list.files(SourceFolder, full.names = TRUE) }
   
+  #Only do files that are missing. prevents overwrites and allows picking up from earlier point
+  Source <- files %>% basename 
+  Target <- list.files(TargetFolder, full.names = TRUE)[1:2] %>% basename %>% gsub(pattern = ".graphml", replacement =  "", x = .)
+ 
+  files <- files[!(Source %in% Target)]
+
     for (i in 1:length(files)){
 
       datdat<-readRDS(files[i]) %>% 
@@ -31,8 +37,8 @@ CreateAllGraphs2 <- function(SourceFolder, TargetFolder,cutoff=0.7,  StartTime =
       graph <-detectcomms(graph)
       print("Clusters detected")
       
-      filename <- sub(".rds","",files[i])
-      SavePath <- file.path(TargetFolder, paste(basename(filename) ,".graphml",sep=""))
+      filename <- paste(basename(sub(".rds","",files[i])) ,".graphml",sep="")
+      SavePath <- file.path(TargetFolder, filename)
       print(SavePath)
       write.graph(graph, 
                   SavePath, 

@@ -35,35 +35,25 @@ MScThesis <-file.path(DropboxPath, "MScThesis")
 figurespath <- file.path(MsCThesis, "Figures")
 ZipData <- file.path(rootwd, "Dropbox", "MScThesis")
 daytimeseries <- file.path(MScThesis, "DayTimeSeries")
-GraphPath <- file.path("/media/jonno/Seagate Expansion Drive/Msc-Thesis-Data/Graphs/WholeDay")
-GraphFolder <- file.path("/media/jonno/Seagate Expansion Drive/Msc-Thesis-Data/Graphs")
+SavedData <- file.path("/media/jonno/Seagate Expansion Drive/Msc-Thesis-Data")
+ModelBlock <- file.path(file.path(SavedData, "ModelBlock"))
 
-library("RStudioAMI")
-includeSyncDropbox("BigHeat")
+#GraphPath <- file.path("/media/jonno/Seagate Expansion Drive/Msc-Thesis-Data/Graphs/WholeDay")
+
+
+#library("RStudioAMI")
+#includeSyncDropbox("BigHeat")
 #excludeSyncDropbox("BigHeat")
 
 list.files(file.path(DropboxPath,"SmartMeterThesisCode/Functions"), full.names = T) %>% map(~{source(.x)})
 list.files(file.path(DropboxPath, "SmartRtimes/Functions"), full.names = T) %>% map(~{source(.x)})
 list.files(file.path(DropboxPath, "BigHeat/Functions"), full.names = T) %>% map(~{source(.x)})
 
+mape <- function(yhat, y){
+mean(abs((y - yhat)/y), na.rm = TRUE)}
+
 ```
 
-
-
-```{r}
-
-
-  basewd <- "/home/jonno/Dropbox/Thesis-Data"#"C:/Users/pc1/Dropbox/Thesis-Data"
-
-#These need to be added when necessary
-  #Figures <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University-College-London-thesis/Figures")
- #TexTables <- file.path("C:/Users/pc1/Dropbox/Apps/ShareLaTeX/University-College-London-thesis/Tables")
-  
-  SubDataSets <- file.path(basewd, "SubDataSets")
-datafile <- file.path(basewd, "TCa1")
-
-  
-```
 
 #Load the data
 
@@ -173,8 +163,6 @@ saveRDS(cleandata, file ="cleandatafilled.rds")
 
 SaveAsDay(cleandata, daytimeseries)
 
-
-
 ```
 
 
@@ -203,33 +191,32 @@ IntCorList <- map(unique(IntCor$NodeID), ~{
 
 ```
 
-#Split point
-
-Everything above this point is common data processing. Below this point the processing is dependent on the time of day to be analyzed
-
 #Choose edge corellation
-
+Chooses the edge corellation for each of the model versions
 
 ```{r}
-#calculates information about the best cutoff point to choose 
-TimePeriods <- data_frame(Start = c("00:00:00", "00:00:00", "03:00:00", "09:00:00", "15:00:00", "18:00:00" ),
-           End= c("24:00:00", "06:00:00", "09:00:00", "15:00:00", "21:00:00", "24:00:00" ))
 
 TimePeriods <- data_frame(Start = c("00:00:00","00:00:00","12:00:00", "00:00:00", "06:00:00", "12:00:00", "18:00:00" ),
-           End= c("24:00:00", "12:00:00","24:00:00","06:00:00", "12:00:00", "18:00:00", "24:00:00" ))
+           End= c("24:00:00", "12:00:00","24:00:00","06:00:00", "12:00:00", "18:00:00", "24:00:00" ),
+           daypart = c("WholeDay", "Morning12", "Afternoon12", "EarlyMorning6", "Morning6", "Afternoon6", "Evening6"))
 
-TimeAnalysis <- (1:nrow(TimePeriods)) %>%
+if(file.exists(file.path(SavedData, "TimeAnalysis.rds"))){
+  TimeAnalysis <- readRDS(file.path(MScThesis, "TimeAnalysis.rds"))
+} else{
+
+
+TimeAnalysis <- 1:nrow(TimePeriods) %>%
   map_df(~{
     
     periodchar <-paste(TimePeriods$Start[.x], TimePeriods$End[.x], sep = "-")
     print(periodchar)
     GetCutoffReduction(StartTime = TimePeriods$Start[.x], EndTIme = TimePeriods$End[.x], samples = 30) %>%
-      mutate(period = periodchar)
-    
+      mutate(period = periodchar,
+             daypart = TimePeriods$daypart[.x])
   })
+  saveRDS(TimeAnalysis, file.path(SavedData, "TimeAnalysis.rds"))
 
-#saveRDS(TimeAnalysis, file.path(MScThesis, "TimeAnalysis.rds"))
-#TimeAnalysis <- readRDS(file.path(MScThesis, "TimeAnalysis.rds"))
+}
 
 CutoffDiff  <- TimeAnalysis %>%
   select(type, period, cutoff, value) %>%
@@ -248,23 +235,21 @@ CutoffDiff %>%
 
 ```
 
-
 #Create all graphs using the cutoffs previously selected
 
 #Create graphs and cluster
 ```{r}
-TimePeriods2 <- TimePeriods %>% arrange(paste(Start, End, sep = "-")) %>%
+TimePeriods <- TimePeriods %>% arrange(paste(Start, End, sep = "-")) %>%
   mutate(cutoff = CutoffDiff %>%
   group_by(period) %>%
   filter(diff == max(diff)) %>% pull(cutoff),
-  folder = c(NA, "WholeDay", "Morning", "Midday", "Evening", NA)) %>%
-  filter(!is.na(folder)) %>% .[-1,]
+         cutoff2 = cutoff - 0.05)
 
-1:nrow(TimePeriods2) %>% walk(~{
+1:nrow(TimePeriods) %>% walk(~{
   
 CreateAllGraphs2(SourceFolder = daytimeseries, 
-                 TargetFolder = file.path(GraphFolder, TimePeriods2$folder[.x]),
-                 cutoff = TimePeriods2$cutoff[.x]-0.05,
+                 TargetFolder = file.path(ModelBlock, TimePeriods2$daypart[.x], "Graphs"),
+                 cutoff = TimePeriods2$cutoff2[.x],
                  StartTime = TimePeriods2$Start[.x],
                  EndTIme = TimePeriods2$End[.x])
 
@@ -273,6 +258,11 @@ CreateAllGraphs2(SourceFolder = daytimeseries,
 rm(TimePeriods2)
 
 ```
+
+
+#Split point
+
+Everything above this point is common data processing. Below this point the processing is dependent on the time of day to be analyzed
 
 
 ##Choose clustering algorithm
@@ -345,37 +335,71 @@ rm(list = "CommTimes", "graph", "bench")
 
 #Assign Cluster Family ID
 
-Needs NodesClust, ClusterConversion NodeClusterList, clusterprofile
-
-functions
-MakeClusterProfile, NodeClusterLists
-
 ```{r}
-#creates a list of which node is part of which day cluster
-nodeclustlist <- NodeClusterList(GraphPath)
 
-dayorder <- names(nodeclustlist) %>% ymd
+TimePeriods$daypart %>% walk(~{
+  print(.x)
+  daypart <- .x
+  
+  print(daypart)
+  source(file = file.path(DropboxPath,"SmartMeterThesisCode/SubCode", "PredictionProcess.R"))
 
-#creates the table that gives the number of nodes per cluster, and gives each cluster a unique ID across all the days
-Clustconversion <- 1:length(nodeclustlist) %>%
-  map_df(~{
-  nodeclustlist[[.x]] %>%
-  group_by(cluster) %>%
-  summarise(NodesInCluster= n()) %>% 
-  mutate(day=.x, 
-         date=dayorder[.x],
-         IntraDayRank=rank(-(NodesInCluster), ties.method="random"))
-  }) %>%
-   mutate(UniqueID = 1:nrow(.) %>% make.names)
+  }
+)
 
-rm(dayorder)
+for(i in 1:nrow(TimePeriods)){
+  
+  daypart <- TimePeriods$daypart[i]
+  StartTimei <- TimePeriods$Start[i]
+  EndTimei <- TimePeriods$End[i]
+  cutoffi <- TimePeriods$cutoff2[i]
+  
+  print(TimePeriods[i,])
 
-clusterprofile <- CreateAllProfiles(Clustconversion, daytimeseries, nodeclustlist)
+  
+  source(file = file.path(DropboxPath,"SmartMeterThesisCode/SubCode", "PredictionProcess.R"))
 
-Clustergraph <- CreateClusterGraph(Clustconversion, clusterprofile, clustercutoff = 50, edgecutoff = 0.65)
+  }
 
 
+#The plots show that the 24 hour clusters are broad time of day clusters
+test <- melt(clusterprofile, id ="time", variable.name = "UniqueID", value.name = "kwh" ) %>%
+  left_join(., select(Clustconversion, UniqueID, ClustID), 
+            by = "UniqueID") 
+test %>% 
+  group_by(ClustID, time) %>% 
+  summarise(mean= mean(kwh), median=median(kwh), sd=sd(kwh), sum=sum(kwh)) %>% 
+  ungroup %>%
+  ggplot( aes(x=time, y=mean, group= ClustID, colour= ClustID)) + geom_line() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+test %>% 
+  filter(ClustID !="soup") %>%
+     ggplot(., aes(x=time,y=kwh, group=UniqueID,colour=ClustID)) +
+     geom_line(alpha=0.1)+
+     facet_grid(ClustID~.) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
 
 ```
 
+```{r}
+
+
+Pred2 <- PredictedProfiles %>%
+  select(-ClustID) %>%
+  group_by(time, date) %>%
+  summarise_all(sum, na.rm = T)
+
+PredictedProfiles %>%
+  ggplot(aes(x = time, y = kwh, group = paste(ClustID, date),  colour = ClustID))+ geom_line() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+PredictedProfiles %>%
+  ggplot(aes(x = time, y = TrueValues, group = paste(ClustID, date),  colour = ClustID))+ geom_line() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+metrics(data = Pred2, truth = TrueValues, estimate = kwh) %>% 
+  mutate(mape =  mape(Pred2$kwh, Pred2$TrueValues))
+
+```
 
