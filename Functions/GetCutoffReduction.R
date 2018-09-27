@@ -1,6 +1,13 @@
-GetCutoffReduction <- function(daydatapath= daytimeseries, StartTime = "00:00:00", EndTIme = "24:00:00", samples = 10, seed = 1372){
+GetCutoffReduction <- function(daydatapath = daytimeseries, StartTime = "00:00:00", EndTIme = "24:00:00", samples = 10, seed = 1372){
+  #Randomly samples certain days and finds the number of edges and nodes in a graph with a given cutoff
+  #daydatapath: the path where the data is stored
+  #StartTime: beginning of time period of interest
+  #EndTime: End of time period of interest
+  #samples: number of days to check
+  #seed: the random seed to be used in the experiment
   
   cutoff <- data.frame(cutoff = c(0,seq(0.1,1,0.05)), edges = NA,nodes=NA)
+  
   set.seed(seed)
   files <-sample(list.files(path = daydatapath, full.names = T), samples)
   

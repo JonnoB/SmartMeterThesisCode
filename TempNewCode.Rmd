@@ -10,6 +10,9 @@ editor_options:
 #new correlation package useful for this work
 https://drsimonj.svbtle.com/exploring-correlations-in-r-with-corrr
 
+
+The Create CLuster graph function is not working properly the graphs are not getting clusters I don't know why
+
 #setup block
 
 ```{r}
@@ -17,7 +20,7 @@ https://drsimonj.svbtle.com/exploring-correlations-in-r-with-corrr
 #packages <-c("stringr", "lubridate", "data.table","caret", "xgboost","e1071", "R.utils", "corrplot", "Hmisc", "Amelia", "Matrix", "ff", "ggdendro", "zoo", "networkD3", "igraph","parallel", "magrittr", "ggplot2", "tidyr", "xtable","entropy","dplyr", "microbenchmark", "FeatureHashing")
 
 
-packages <- c("tidyverse", "stringr", "readr", "zoo", "lubridate", "data.table", "ff", "igraph", "microbenchmark")
+packages <- c("tidyverse", "stringr", "readr", "zoo", "lubridate", "data.table", "ff", "igraph", "microbenchmark", "yardstick")
 #file.path("/media/jonno/Seagate Expansion Drive/Msc-Thesis-Data/Cormats")
 
 new.packages <- packages[!(packages %in% installed.packages()[,"Package"])]
@@ -201,7 +204,7 @@ TimePeriods <- data_frame(Start = c("00:00:00","00:00:00","12:00:00", "00:00:00"
            daypart = c("WholeDay", "Morning12", "Afternoon12", "EarlyMorning6", "Morning6", "Afternoon6", "Evening6"))
 
 if(file.exists(file.path(SavedData, "TimeAnalysis.rds"))){
-  TimeAnalysis <- readRDS(file.path(MScThesis, "TimeAnalysis.rds"))
+  TimeAnalysis <- readRDS(file.path(SavedData, "TimeAnalysis.rds"))
 } else{
 
 
@@ -354,13 +357,11 @@ for(i in 1:nrow(TimePeriods)){
   EndTimei <- TimePeriods$End[i]
   cutoffi <- TimePeriods$cutoff2[i]
   
-  print(TimePeriods[i,])
-
+  CreateBaseModellingData(daypart, ModelBlock, StartTimei, EndTimei, cutoffi)
   
   source(file = file.path(DropboxPath,"SmartMeterThesisCode/SubCode", "PredictionProcess.R"))
 
   }
-
 
 #The plots show that the 24 hour clusters are broad time of day clusters
 test <- melt(clusterprofile, id ="time", variable.name = "UniqueID", value.name = "kwh" ) %>%
@@ -380,26 +381,368 @@ test %>%
      facet_grid(ClustID~.) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
 
+
+
+
 ```
+
+
+#Predict Transmission
 
 ```{r}
 
 
+PredictedProfiles  <- 1:10 %>% map_df(~{
+  
+  Fold <- .x
+  
+  FoldProfiles <- 1:7 %>%
+  map_df(~{
+    readRDS(file.path(ModelBlock, TimePeriods$daypart[.x], 
+                      "PredictedProfiles", 
+                      paste0("PredProfiles_Fold",Fold,".rds"))) %>%
+      mutate(daypart = TimePeriods$daypart[.x],
+        type = case_when(
+          grepl("6", daypart) ~"6",
+          grepl("12", daypart) ~"12",
+          TRUE ~ "WholeDay"
+        ),
+        Fold = Fold)
+    })
+})
+
 Pred2 <- PredictedProfiles %>%
-  select(-ClustID) %>%
+  mutate(isReal = ProfileType=="True Profile") %>%
+  select(-ClustID,-ProfileType,-type) %>%
+  group_by(time, date, daypart, Fold) %>%
+  summarise_all(sum, na.rm = T) %>%
+   mutate(diffperc = (kwh -TrueValues)/TrueValues,
+          day = weekdays(as.Date(date))) %>%
+ mutate(day = factor(day, 
+                     levels =  c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")),
+        type = case_when(
+          grepl("6", daypart) ~"6",
+          grepl("12", daypart) ~"12",
+          TRUE ~ "WholeDay"
+        ))
+
+PredictedProfiles %>%
+  ggplot(aes(x = time, y = kwh, group = paste(ClustID, date),  colour = ClustID))+ geom_line(alpha = 0.2) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_wrap(type~.)
+
+PredictedProfiles %>%
+  ggplot(aes(x = time, y = TrueValues, group = paste(ClustID, date),  colour = ClustID))+  geom_line(alpha = 0.2)+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+Pred2 %>%
+  ggplot(aes(x = time, y = kwh-TrueValues, group = paste(type, date),  colour = type))+ geom_line(alpha = 0.2) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_wrap(type~.)
+
+  
+
+TransmissionPerf <- c("6", "12", "WholeDay") %>%
+  map_df(~{
+    
+    Target <- Pred2 %>%
+      filter(type == .x)
+    
+    1:10 %>%
+      map_df(~{
+        
+        Target <- Target %>%
+          filter(Fold == .x) 
+        
+        metrics(Target,  truth = TrueValues, estimate = kwh)%>% 
+  mutate(mape =  mape(Target$kwh, Target$TrueValues)) %>%
+          mutate(Fold = .x)
+        
+      }) %>%
+      mutate(type = .x)
+    
+  }) %>%
+  mutate(ModelType = "Transmission")
+  
+
+
+DayRes <-unique(Pred2$date) %>% map_df(~{
+
+  Temp <- Pred2 %>%
+    filter(date == .x)
+  metrics(data = Temp, truth = TrueValues, estimate = kwh) %>% 
+  mutate(mape =  mape(Temp$kwh, Temp$TrueValues),
+         date = .x,
+         day = weekdays(as.Date(.x)))
+  
+  
+})
+
+
+DayRes %>%
+  group_by(day) %>%
+  summarise(Mean = mean(mape),
+            Median = median(mape)) %>%
+  arrange(day)
+
+
+Preds6 <- PredictedProfiles %>%
+  mutate(isReal = ProfileType=="True Profile") %>%
+  select(-ClustID,-ProfileType) %>%
+  group_by(time, date, daypart) %>%
+  summarise_all(sum, na.rm = T) %>%
+   mutate(diffperc = (kwh -TrueValues)/TrueValues,
+          day = weekdays(as.Date(date))) %>%
+ mutate(day = factor(day, 
+                     levels =  c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"))) 
+
+DayPartCombos <- expand.grid(unique(Preds6$date), unique(Preds6$daypart))
+
+DayRes6 <- 1:nrow(DayPartCombos) %>% map_df(~{
+
+Temp <- Preds6 %>%
+    filter(date == DayPartCombos[.x,1], daypart == DayPartCombos[.x,2])
+  metrics(data = Temp, truth = TrueValues, estimate = kwh) %>% 
+  mutate(mape =  mape(Temp$kwh, Temp$TrueValues),
+         date = .x,
+         day = factor(.x, 
+                     levels =  c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")),
+         daypart = DayPartCombos[.x,2]) 
+
+})
+
+test <- DayRes6 %>%
+  group_by(day, daypart) %>%
+  summarise(Mean = mean(mape),
+            Median = median(mape)) %>%
+  arrange(day) %>% ungroup
+
+
+test %>%
+  ggplot(aes(x = day, y = daypart, fill = Mean)) + geom_tile()
+
+
+Preds6 %>% 
+  ggplot(aes(x = daypart, y = TrueValues)) + geom_boxplot()
+
+Preds6 %>% mutate(day = factor(day, 
+                     levels =  c("Monday", "Tuesday", "Wednesday", 
+                                 "Thursday", "Friday", "Saturday", "Sunday"))) %>%
+    ggplot(aes(x = day, y = TrueValues)) + geom_boxplot()
+
+
+mean(DayRes$mape);median(DayRes$mape)
+
+Pred2 %>%
+  ggplot(aes(x = time, y = abs(diffperc), group = date ))+ geom_line(alpha = 0.2) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_wrap(~day)
+
+Pred2 %>%
+  filter(day == "Sunday") %>%
+  ggplot(aes(x = time, y = TrueValues, group = date ))+ geom_line(alpha = 0.2) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_wrap(~day)
+
+Pred2 %>%
+  filter(day == "Sunday",
+         time == "10:00:00") %>%
+  arrange(-TrueValues)
+
+test <- PredictedProfiles %>%
+  filter(date == "2012-04-29")
+weekdays(as.Date("2012-04-29"))
+
+```
+
+
+#Create Graphs out of day profiles
+
+```{r}
+
+daypart <- "WholeDay"
+Clustconversion <- readRDS(file.path(ModelBlock, daypart ,"Clustconversion.rds"))
+ 
+test <- clusterprofile <- readRDS(file.path(ModelBlock, daypart , "clusterprofile.rds"))  %>%
+   melt(., id ="time", variable.name = "UniqueID", value.name = "kwh" ) %>%
+  left_join(., Clustconversion %>% select(UniqueID, date)) %>%
+  select(-UniqueID) %>%
   group_by(time, date) %>%
-  summarise_all(sum, na.rm = T)
+  summarise(kwh_sum = sum(kwh, na.rm = T),
+            kwh_mean = mean(kwh, na.rm = T),
+            isNA  = sum(is.na(kwh)),
+            count = n()) %>%
+  mutate(DayofWeek = weekdays(date))
 
-PredictedProfiles %>%
-  ggplot(aes(x = time, y = kwh, group = paste(ClustID, date),  colour = ClustID))+ geom_line() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+test2 <- test %>%
+  filter(!is.na(date), isNA==0) %>%
+  group_by(date) %>%
+  mutate(max = max(kwh_mean),
+         min = min(kwh_mean),
+         diff = max-min,
+         Shape = (kwh_mean-min)/diff)
 
-PredictedProfiles %>%
-  ggplot(aes(x = time, y = TrueValues, group = paste(ClustID, date),  colour = ClustID))+ geom_line() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+test %>%
+ggplot(aes(x = time, y = kwh_mean, group = date, colour= DayofWeek)) + 
+  geom_line(alpha = 0.2) +
+  facet_wrap(~DayofWeek)
 
-metrics(data = Pred2, truth = TrueValues, estimate = kwh) %>% 
-  mutate(mape =  mape(Pred2$kwh, Pred2$TrueValues))
+test2 %>%
+ggplot(aes(x = time, y = Shape, group = date, colour= DayofWeek)) + 
+  geom_line(alpha = 0.2) +
+  facet_wrap(~DayofWeek)
+
+test3 <- test2 %>%
+  select(time, date, Shape) %>%
+  dcast(time~date, value.var = "Shape", drop=FALSE)
+
+
+  cutoff <- data.frame(cutoff = c(0,seq(0.1,1,0.05)), edges = NA,nodes=NA)
+
+ cormat <- test3[,2:ncol(test3)] %>%
+      as.matrix %>% cor
+    diag(cormat) <- 0
+    
+    cutoff[,-1] <- map_df(cutoff$cutoff ,~{
+      logicmat<-cormat>.x
+      c(sum(logicmat, na.rm = TRUE),
+        sum(rowSums(logicmat,na.rm=TRUE)>0)
+      ) %>% 
+        t %>% as.data.frame
+    })
+    
+    cutoff %>% 
+      mutate(
+        NodePerc = nodes/max(nodes),
+        EdgePerc = edges/max(edges),
+        diff = NodePerc-EdgePerc)
+
+      graph <- createcleangraph2(cormat, cormat > 0.95)
+
+      graph <-detectcomms(graph)
+    
+ vertices <-data.frame(NodeID = V(graph)$name, 
+                          cluster = get.vertex.attribute(graph, "ClusterID"))
+
+  vcount(graph)
+ ecount(graph)
+
+  
+ plot(graph, vertex.label=NA, vertex.size = 1)
+
+ 
+orderedheat(cormat, simMat = T, mid = 0.87)
+
+
+ 
+```
+
+
+#Create Day Profile
+```{r}
+#Create profile for each day
+  if(file.exists(file.path(SavedData ,"DayProfile.rds"))){
+   
+    DayProfile <- readRDS(file.path(SavedData ,"DayProfile.rds"))
+    
+  }else{
+   DayProfile <- list.files(daytimeseries, full.names = TRUE) %>% 
+     map_df(~{
+       DayProfile <- readRDS(.x)
+       
+       tibble(DateTime = DayProfile[,1], kwh = rowSums(DayProfile[,-1]))
+       }) %>%
+    mutate(time =  strftime(DateTime, format="%H:%M:%S", tz = "UTC") ,
+           Date = as.Date(DateTime))
+  
+   saveRDS(DayProfile, file.path(SavedData ,"DayProfile.rds"))
+     
+  }
+```
+
+
+#Whole day Linear Model
+```{r}
+
+
+AllDates <- unique(DayProfile$Date)
+Dayindices <- 1:length(AllDates)
+Folds <- split(Dayindices, ceiling(seq_along(Dayindices)/ceiling(length(Dayindices)/10)))
+
+#Create seperate models
+
+LineaModelResults  <- 1:7 %>% map(~{
+#.x <- 1
+daypart <- TimePeriods$daypart[.x]
+StartTime <- TimePeriods$Start[.x]
+EndTime <- TimePeriods$End[.x]
+print(paste("Calculating Linear model for", daypart))
+
+
+CrossValidated <- 1:length(Folds) %>% map_df(~{
+  TestDates <- AllDates[Folds[[.x]]] 
+  TrainDates <- AllDates[!(AllDates %in% TestDates)]
+  
+  test2 <- DayProfile  %>% filter(as.Date(DateTime) %in% as.Date(TrainDates)) %>%
+   mutate(lagtime = lag(kwh, 48)) %>%
+   filter(!is.na(lagtime))  %>%
+    filter(time >= StartTime, time < EndTime)
+  
+  test3 <- lm(kwh~lagtime, test2)
+  
+  test4 <- DayProfile  %>% filter(as.Date(DateTime) %in% as.Date(TestDates)) %>%
+  mutate(lagtime = lag(kwh, 48)) %>%
+  augment(test3, 
+                 newdata =  .) %>%
+  filter(!is.na(lagtime)) %>%
+  mutate(Fold = .x)
+
+}) %>% 
+  mutate(daypart = daypart)
+
+})
+names(LineaModelResults) <- TimePeriods$daypart
+
+
+LinearPerf <- c("6", "12", "WholeDay") %>%
+  map_df(~{
+    Target <- LineaModelResults[grepl(.x, names(LineaModelResults))]  %>% bind_rows
+    
+    1:10 %>%
+      map_df(~{
+        
+        Target <- Target %>%
+          filter(Fold == .x) 
+        
+        metrics(Target,  truth = .fitted, estimate = kwh)%>% 
+  mutate(mape =  mape(Target$kwh, Target$.fitted)) %>%
+          mutate(Fold = .x)
+        
+      }) %>%
+      mutate(type = .x)
+
+}) %>%
+  mutate(ModelType = "Linear")
+
+
+
+#Shows side by side generic next day prediction for the 3 model types
+test <- bind_rows(TransmissionPerf, LinearPerf)
+
+#Linear model clearly outperforms the the transmission model
+test %>%
+  ggplot(aes(x=type, y = rsq, fill = ModelType))+ geom_boxplot() 
+
+```
+
+
+Grouping by node similarity
+
+using accuracy to create similarity matrix for smart-meters
+
+```{r}
+
+
 
 ```
 

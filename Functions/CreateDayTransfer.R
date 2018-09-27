@@ -1,4 +1,4 @@
-CreateDayTransfer <- function(NodeClust, Clustconversion){
+CreateDayTransfer <- function(NodeClust, Clustconversion, nodeclustlist){
   #creates the transfer counts from day A to day B, ensures that all clusters are included even if transfer = 0
   
   Combos <- unique(Clustconversion$ClustID)

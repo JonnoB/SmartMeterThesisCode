@@ -1,0 +1,142 @@
+---
+title: "Metric backbone"
+author: "Jonathan Bourne"
+date: "27 September 2018"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+
+
+```{r}
+
+nodebase <-100
+
+set.seed(876)
+s <- matrix(rnorm(nodebase^2), nodebase) #%>% cor
+s <- s +abs(min(s))+0.001
+s[lower.tri(s)] = t(s)[lower.tri(s)]
+#s <- sqrt(2*(1-s))
+diag(s) <- 0
+s2<- s
+s2
+
+Stage1SemiMetricRemoval <- function(s){
+#Matrix of 1 triangle semi-metric edges
+  #s: a distance matrix
+    SemiMetric <- 1:ncol(s) %>%
+      map(~{
+        print(.x)
+   # LogicMat <- t( s+s[,.x]) < (s[,.x]) 
+    Smat<- col(s) 
+     LogicMat <- s+s[,.x][Smat] < (s[,.x]) #slightly faster than using transpose it still takes ages though
+ 
+     matrix(data = rowSums(LogicMat, na.rm = TRUE ) > 0, ncol = 1) #TRUE means semi-metric edge
+      
+      }) %>%
+      do.call(cbind,.)
+    
+    
+    s[SemiMetric] <- NA #change Semi-metric values to NA. This makes the further stages easier to manage
+    
+    s
+
+}
+
+Smat<- col(s)
+microbenchmark(t( s[,.x]+s) < (s[,.x]), sweep(s, 2, s[,.x], `+`), s+s[,.x][Smat])
+
+s3 <- Stage1SemiMetricRemoval(s)
+
+s3[is.na(s3)] <- 0
+
+g <- graph_from_adjacency_matrix(s3, mode = "undirected", weighted = "weight", diag = FALSE) 
+
+ecount(g)
+maxedge <- nodebase*(nodebase-1)/2
+ecount(g)/(maxedge )
+
+table(degree(g))
+
+plot(g)
+```
+
+
+try with real data
+```{r}
+ 
+setwd("/home/jonno/Dropbox/MScThesis/DayTimeSeries")
+
+datdat <- readRDS(list.files()[1]) %>% 
+        as.tibble 
+      
+      cormat <- datdat[,2:ncol(datdat)] %>%
+        as.matrix %>% cor
+      diag(cormat) <- 0
+      #cormat[is.na(cormat)] <- 0
+      distmat <-sqrt(2*(1-cormat))
+
+      min(distmat)
+      max(distmat)
+      
+test <- Stage1SemiMetricRemoval(distmat)
+test[is.na(test)] <- 0
+
+gtest <- graph_from_adjacency_matrix(test, mode = "undirected", weighted = "weight", diag = FALSE) 
+
+
+ecount(gtest)
+maxedgetest <- ncol(cormat)*(ncol(cormat)-1)/2
+ecount(gtest)/(maxedgetest)
+components(gtest)
+
+plot(gtest)
+
+```
+
+
+```{r}
+apply_cosine_similarity <- function(df){
+  cos.sim <- function(df, ix) 
+  {
+    A = df[ix[1],]
+    B = df[ix[2],]
+    return( sum(A*B)/sqrt(sum(A^2)*sum(B^2)) )
+  }   
+  n <- nrow(df) 
+  cmb <- expand.grid(i=1:n, j=1:n) 
+  C <- matrix(apply(cmb,1,function(cmb){ cos.sim(df, cmb) }),n,n)
+  C
+}
+
+
+
+dist2<- apply_cosine_similarity(t(as.matrix(datdat[, 2:100])))
+dist2 <- cor(as.matrix(datdat[, 2:100]), method = "spearman")
+dist1 <- cor((as.matrix(datdat[, 2:100])))
+
+dist1[1:10, 1:10]
+dist2[1:10, 1:10]
+
+dist2 <- (1-dist2)
+
+dist3 <- dist2
+
+
+
+test2 <- Stage1SemiMetricRemoval(dist2)
+test2[is.na(test2)] <- 0
+diag(test2) <- 0
+
+gtest <- graph_from_adjacency_matrix(test2 , mode = "undirected", weighted = "weight", diag = FALSE) 
+
+
+ecount(gtest)
+maxedgetest <- ncol(dist2)*(ncol(dist2)-1)/2
+ecount(gtest)/(maxedgetest)
+components(gtest)
+plot(gtest)
+```
+

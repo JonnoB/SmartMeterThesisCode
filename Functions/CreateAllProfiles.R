@@ -14,9 +14,9 @@ CreateAllProfiles <- function(Clustconversion, daytimeseries, nodeclustlist, Sta
   
   BaseTime <- seq(ymd_hms('2014-01-21 00:00:00'), 
                   by = '30 min',length.out=(60*24/30)) %>% 
-    strftime(., format="%H:%M:%S") %>% 
+    strftime(., format="%H:%M:%S", tz = "UTC") %>% 
     data_frame(time = .) %>%
-    filter(time>=StartTime, time<EndTime)
+    filter(time >= StartTime, time < EndTime)
   
   
   clusterprofile <- dates  %>% map(~{
@@ -28,7 +28,7 @@ CreateAllProfiles <- function(Clustconversion, daytimeseries, nodeclustlist, Sta
       gather(key = NodeID, value = value, -Date.Time) %>%
       left_join(., nodeclustlist[[.x]] %>% mutate(NodeID = sub("X", "", NodeID)), by = "NodeID") %>%
       select(value, ClusterID = cluster, time = Date.Time) %>%
-      mutate(time = strftime(time, format="%H:%M:%S"),
+      mutate(time = strftime(time, format="%H:%M:%S", tz = "UTC"),
              ClusterID = as.character(ClusterID)) %>%
       group_by(ClusterID, time) %>%
       summarise_all(mean) %>% ungroup 

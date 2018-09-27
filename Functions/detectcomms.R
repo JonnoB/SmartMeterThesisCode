@@ -4,7 +4,7 @@ detectcomms <- function(graph){
   fc <- cluster_louvain(graph)
   community <-membership(fc) %>%table %>% as.data.frame()
   names(community)[1] <- "community_number"
-  community$community_number<-community$community_number
+  community$community_number<-community$community_number #does this do anything?
   community$community_conv <-1:nrow(community)
   community$community_conv[community$community_conv>5] <-6
   
