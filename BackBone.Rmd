@@ -21,8 +21,9 @@ Phase1SemiMetricRemoval <- function(s){
       SemiMetric <- 1:ncol(s) %>%
       map(~{
         print(.x)
-   # LogicMat <- t( s+s[,.x]) < (s[,.x]) 
-     LogicMat <- s+s[,.x][Smat] < (s[,.x]) #slightly faster than using transpose it still takes ages though
+     #   TargetRows <- (.x+1):ncol(s)
+     #LogicMat <- s[TargetRows,] + s[TargetRows,.x][Smat[TargetRows,]] < (s[TargetRows,.x])
+     LogicMat <- s + s[,.x][Smat] < (s[,.x]) #slightly faster than using transpose it still takes ages though
  
      matrix(data = rowSums(LogicMat, na.rm = TRUE ) > 0, ncol = 1) #TRUE means semi-metric edge
       
@@ -35,6 +36,7 @@ Phase1SemiMetricRemoval <- function(s){
     s
 
 }
+
 ```
 
 
@@ -66,7 +68,7 @@ TwoHopMetric <- function(s3, MetricDF){
   #MetricDF if the shortest path metric matrix
   
   for(n in 1:ncol(s3)){  
-  print(n)
+ 
   TargetNode <- n
   
   MetricVect <- which(MetricDF[,TargetNode]==T)
@@ -110,7 +112,7 @@ Phase2TwoHopMetric <- function(s3){
   #Performs phase 2 of the metric backbone process.
   #Takes the output matrix of phase 1
   #s3: out put matrix of phase 1
-  
+  diag(s3) <- NA
   MetricDF <- ShortestEdgeMetric(s3) %>%
     TwoHopMetric(s3, .)
   
@@ -120,32 +122,141 @@ Phase2TwoHopMetric <- function(s3){
 
 ```
 
+```{r}
+MakeEdgList <- function(mat, VarName){
+  #required as part of the phase 3 function
+  
+  melts3 <- mat*lower.tri(mat)
+  melts3[ melts3 == 0 ] <- NA
+  melts3 <- melts3 %>% 
+    as.data.table(., keep.rownames= T) %>%
+    melt(id.vars = "rn", 
+       variable.name = "node2", 
+       value = VarName, 
+       na.rm = T)
+  
+}
+
+
+Phase3MetricEdges <- function(s3, s4){
+  #Removes the final semi-metric edges creating the metric backbone
+  
+  #variables throughout the function to save memory
+  
+  melts3 <- MakeEdgList(s3, "weight")
+  melts4 <- MakeEdgList(s4, "Metric")
+
+melts3 <- melts4[melts3, on = c("node2", "rn")][!is.na(weight)] %>%
+  as.tibble %>% rename(node1 = rn) %>%
+  mutate(edge_name = paste0(node1,"_", node2),
+         Metric = ifelse(is.na(Metric), FALSE, TRUE),
+         node2 = as.character(node2))
+
+rm(melts4)
+
+g <- graph_from_data_frame(melts3, directed = FALSE)
+
+VertexID<- tibble(node = get.vertex.attribute(g, "name"), ID = 1:vcount(g))
+
+Unlabled <- melts3 %>%
+  filter(Metric ==FALSE) %>%
+  left_join(., VertexID, by = c("node1" = "node")) %>%
+  left_join(., VertexID, by = c("node2" = "node")) %>%
+  rename(node1_ID = ID.x, node2_ID = ID.y)
+
+rm(VertexID)
+
+print("Perform Breadth first search across all unlabled nodes")
+
+ShortestPath <-1:nrow(Unlabled) %>% map_dbl(~{
+  distances(g, v = Unlabled$node1_ID[.x], to =Unlabled$node2_ID[.x] )
+  })
+
+Unlabled <- Unlabled %>%
+  mutate(TrueShortest = ShortestPath,
+         Metric = ifelse(all.equal(weight,TrueShortest), TRUE, FALSE))
+
+print("Remove final Semi-metric edges")
+
+melts3 <- melts3 %>%
+  filter(Metric) %>%
+  bind_rows(select(Unlabled, node1:edge_name))
+  
+return(melts3)
+
+}
+
+```
+
 
 ```{r}
 
-nodebase <-1000
+```
+
+
+```{r}
+
+nodebase <-10
 
 set.seed(876)
 s <- matrix(rnorm(nodebase^2), nodebase) #%>% cor
-# s <- s +abs(min(s))+0.001
-# s[lower.tri(s)] = t(s)[lower.tri(s)]
-# diag(s) <- 0
-s <- (1-cor(s))^2   #square is used to exxagerate differences for testing small matrices
-s2<- s
-s2
-
+ s <- s +abs(min(s))+0.001
+ s[lower.tri(s)] = t(s)[lower.tri(s)]
+ diag(s) <- 0
+colnames(s) <- make.names(1:ncol(s))
+rownames(s) <- make.names(1:ncol(s))
+ 
+#s <-( 1-cor(s))  #square is used to exxagerate differences for testing small matrices
+# s2<- s
+# s2
+ 
 s3 <- Phase1SemiMetricRemoval(s)
 diag(s3)<- NA
 
-test <- Phase2TwoHopMetric(s3)
+s4 <- Phase2TwoHopMetric(s3)
+
+test <- Phase3MetricEdges(s3, s4)
+
+#diag(s4) <- NA
+s4[1:10,1:10]
+
+sum(s4, na.rm = T)#number of postively ID'd metric edges
 
 
 
-sum(MetricDF!=test)
+melts3 <- MakeEdgList(s3, "weight")
+melts4 <- MakeEdgList(s4, "Metric")
 
-s3[is.na(s3)] <- 0
+melts3 <- melts4[melts3, on = c("node2", "rn")][!is.na(weight)] %>%
+  as.tibble %>% rename(node1 = rn) %>%
+  mutate(edge_name = paste0(node1,"_", node2),
+         Metric = ifelse(is.na(Metric), FALSE, TRUE))
 
-g <- graph_from_adjacency_matrix(s3, mode = "undirected", weighted = "weight", diag = FALSE) 
+g <- graph_from_data_frame(melts3, directed = FALSE)
+
+VertexID<- tibble(node = get.vertex.attribute(g, "name"), ID = 1:vcount(g))
+
+get.edge.attribute(g, "edge_name")
+
+Unlabled <- melts3 %>%
+  filter(Metric ==FALSE) %>%
+  left_join(., VertexID, by = c("node1" = "node")) %>%
+  left_join(., VertexID, by = c("node2" = "node")) %>%
+  rename(node1_ID = ID.x, node2_ID = ID.y)
+
+print("Perform Breadth first search across all unlabled nodes")
+
+ShortestPath <-1:nrow(Unlabled) %>% map_dbl(~{
+  distances(g, v = Unlabled$node1_ID[.x], to =Unlabled$node2_ID[.x] )
+  })
+
+Unlabled <- Unlabled %>%
+  mutate(TrueShortest = ShortestPath,
+         Metric = ifelse(all.equal(weight,TrueShortest), TRUE, FALSE))
+
+print("Remove final Semi-metric edges")
+
+
 
 ecount(g)
 maxedge <- nodebase*(nodebase-1)/2
@@ -153,7 +264,10 @@ ecount(g)/(maxedge )
 
 table(degree(g))
 
-plot(g)
+clus <-cluster_louvain(g)
+colors <- rainbow(max(membership(clus)))
+plot(g,vertex.color=colors[membership(clus)], vertex.label=NA, vertex.size = 3)
+
 ```
 
 
@@ -167,9 +281,9 @@ datdat <- readRDS(list.files()[1]) %>%
       
       cormat <- datdat[,2:ncol(datdat)] %>%
         as.matrix %>% cor(.)
-      diag(cormat) <- 0
       distmat <-1-cormat
-
+      diag(cormat) <- NA
+      
       min(distmat)
       max(distmat)
       
@@ -178,7 +292,14 @@ test[is.na(test)] <- 0
 
 gtest <- graph_from_adjacency_matrix(test, mode = "undirected", weighted = "weight", diag = FALSE) 
 
+
 saveRDS(gtest, file.path(SavedData, "gtestSemiMetric1.rds"))
+
+test<- readRDS(file.path(SavedData, "gtestSemiMetric1.rds"))
+
+test2 <- as_adjacency_matrix(test, attr = "weight", sparse =0)
+
+test <- test2 %>% as.data.table()  %>% melt()
 
 ecount(gtest)
 maxedgetest <- ncol(cormat)*(ncol(cormat)-1)/2
@@ -199,7 +320,7 @@ plot(gtest,vertex.color=colors[membership(fc)], vertex.label=NA, vertex.size = 3
 apply_cosine_similarity <- function(df){
   cos.sim <- function(df, ix) 
   {
-    A = df[ix[1],]
+    A = df[ix[1],] 
     B = df[ix[2],]
     return( sum(A*B)/sqrt(sum(A^2)*sum(B^2)) )
   }   
@@ -241,16 +362,54 @@ plot(gtest)
 ```
 
 
+Find triangles with shorter edges
+
+I am tring to find triangles in a distance matrix where a direct path is longer than going via another point.
+The function works well for low values of n but is slow for larger values. 
+I am trying to find out how to speed up this process. I have tried to use lineprof an click through to lower functions, but I don't understand what it is telling me. I don't know if there is some function in igraph that would help?
+
 ```{r}
+library(purrr);library(magrittr); library(lineprof);library(shiny)
 
-x <- y <- 1:10
-y <- x+100
+RemoveTri <- function(s){
+      Smat<- col(s) 
+      
+      RemoveEdge <- 1:ncol(s) %>%
+      map(~{
+      print(.x)
+        
+        LogicMat <- s + s[,.x][Smat] < (s[,.x]) #I used this method to avoid transposing
+        matrix(data = rowSums(LogicMat, na.rm = TRUE ) > 0, ncol = 1) #TRUE means edge can be removed
+      
+      }) %>%
+      do.call(cbind,.)
+    
+    
+    s[RemoveEdge] <- NA
+    
+    s
 
-x %*% y / sqrt(x%*%x * y%*%y)
+}
 
-cor(x,y)
+CreateData <- function(n, seed){
+  set.seed(seed)
+  s <- matrix(rnorm(n^2), n) #%>% cor
+  s <- s +abs(min(s))+0.001
+  s[lower.tri(s)] = t(s)[lower.tri(s)]
+  diag(s) <- 0
+  return(s)
+ }
 
-scale(x)
-scale(y)
+
+s <- CreateData(100, 876)
+RemoveTri(s)
+
+s2 <- CreateData(4000, 876)
+RemoveTri(s2)
+
+
+l <- lineprof(RemoveTri(s))
+shine(l)
+ 
 ```
 
