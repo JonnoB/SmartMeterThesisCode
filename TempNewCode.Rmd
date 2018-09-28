@@ -35,7 +35,7 @@ select <- dplyr::select
 rootwd <-getwd()
 DropboxPath <- file.path(rootwd, "Dropbox")
 MScThesis <-file.path(DropboxPath, "MScThesis")
-figurespath <- file.path(MsCThesis, "Figures")
+figurespath <- file.path(MScThesis, "Figures")
 ZipData <- file.path(rootwd, "Dropbox", "MScThesis")
 daytimeseries <- file.path(MScThesis, "DayTimeSeries")
 SavedData <- file.path("/media/jonno/Seagate Expansion Drive/Msc-Thesis-Data")

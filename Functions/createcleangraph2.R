@@ -1,6 +1,6 @@
 createcleangraph2 <- function(cormat, edgemat, sweep =FALSE){
 
-  weightmat <- sqrt(2*(1-cormat))
+  weightmat <- 1-cormat
   diag(weightmat) <- 0 #removes the diagonal this isn't necessary as it will actually be done in the graph stage
   #not Necessary as edge create is done by the edgemat!
   #weightmat[is.na(weightmat)] <- 0 #removes NA's to prevent automatic edge creation

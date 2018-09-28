@@ -7,30 +7,21 @@ editor_options:
   chunk_output_type: console
 ---
 
-
-
+Stage 1: Identify lines that are definately semi-metric
+Stage 2: Identify lines that are definately 2 hop metric
+Stage 3: Identify remaining lines with breadth first search
 
 ```{r}
-
-nodebase <-100
-
-set.seed(876)
-s <- matrix(rnorm(nodebase^2), nodebase) #%>% cor
-s <- s +abs(min(s))+0.001
-s[lower.tri(s)] = t(s)[lower.tri(s)]
-#s <- sqrt(2*(1-s))
-diag(s) <- 0
-s2<- s
-s2
-
-Stage1SemiMetricRemoval <- function(s){
+#stage 1 
+Phase1SemiMetricRemoval <- function(s){
 #Matrix of 1 triangle semi-metric edges
   #s: a distance matrix
-    SemiMetric <- 1:ncol(s) %>%
+      Smat<- col(s) 
+      
+      SemiMetric <- 1:ncol(s) %>%
       map(~{
         print(.x)
    # LogicMat <- t( s+s[,.x]) < (s[,.x]) 
-    Smat<- col(s) 
      LogicMat <- s+s[,.x][Smat] < (s[,.x]) #slightly faster than using transpose it still takes ages though
  
      matrix(data = rowSums(LogicMat, na.rm = TRUE ) > 0, ncol = 1) #TRUE means semi-metric edge
@@ -44,11 +35,113 @@ Stage1SemiMetricRemoval <- function(s){
     s
 
 }
+```
 
-Smat<- col(s)
-microbenchmark(t( s[,.x]+s) < (s[,.x]), sweep(s, 2, s[,.x], `+`), s+s[,.x][Smat])
 
-s3 <- Stage1SemiMetricRemoval(s)
+```{r}
+ShortestEdgeMetric <- function(s3){
+  #begins phase two of finding the metric backbone
+  #Takes in a matrix that has had the first round of semi-metric edges removed
+  #Finds the shortest edge of each vertex and outputs a symmetric logical matrix
+  #s3 the phase 1 complete distance matrix
+  
+ShortMetric <- 1:nrow(s3) %>% map_dbl(~which.min(s3[,.x])) #lowest value by column
+
+MetricDF <-s3 #Create matrix of correct dimensions
+MetricDF[] <- FALSE #Initially none of the edges are metric
+
+Positions <- ShortMetric+(1:nrow(MetricDF)-1)*ncol(MetricDF) #find the shortest edge of each vertex
+
+MetricDF[Positions] <- TRUE #The shortest edges are metric
+
+MetricDF <- (MetricDF + t(MetricDF))>0 #the matrix is symmetric
+
+MetricDF
+}
+
+
+TwoHopMetric <- function(s3, MetricDF){
+  #Performs the second part of Phase two of creating the metric backbone
+  #s3 is the phase 1 matrix
+  #MetricDF if the shortest path metric matrix
+  
+  for(n in 1:ncol(s3)){  
+  print(n)
+  TargetNode <- n
+  
+  MetricVect <- which(MetricDF[,TargetNode]==T)
+  
+  TargetVect <- s3[,TargetNode]
+  
+  Min_to_beat <- 1:length(MetricVect) %>%
+    map_dbl(~{
+      MetricLength <- TargetVect[MetricVect[.x]] #metric length from target row.
+  
+      min((s3[, MetricVect[.x]]+ MetricLength)[-TargetNode], na.rm = TRUE) #finds the smallest length in the coressponding 
+      ##node to target excluding the target node itself, aka no self-loops.    
+      
+    }) %>% min # The map outputs the shortest two hop of each metric edge, the min then finds the smallest of those.
+  
+  
+  Edges2Check <- rank(TargetVect, na.last = "keep")[!MetricDF[,TargetNode]] #vector of edges to test excluding metric-edges
+  
+  OrderedEdgeDistance <- TargetVect[!MetricDF[,TargetNode]][order(TargetVect[Edges2Check], na.last = NA, decreasing = T)]
+  
+  #this while loop goes through each element and checks whether it is shorter then the minimum distance
+  #The loop breaks when either condition is not met
+  while(OrderedEdgeDistance[n] < Min_to_beat & n <= length(OrderedEdgeDistance)){ 
+    
+    #print(n);print(Min_to_beat)
+    Min_to_beat <- OrderedEdgeDistance[n]
+    
+    #Add in the metric edges for column and row
+    MetricDF[which(TargetVect == Min_to_beat), TargetNode] <- TRUE
+    MetricDF[TargetNode, which(TargetVect == Min_to_beat)] <- TRUE
+  
+    } 
+  
+  }
+  
+  return(MetricDF)
+  
+}
+
+Phase2TwoHopMetric <- function(s3){
+  #Performs phase 2 of the metric backbone process.
+  #Takes the output matrix of phase 1
+  #s3: out put matrix of phase 1
+  
+  MetricDF <- ShortestEdgeMetric(s3) %>%
+    TwoHopMetric(s3, .)
+  
+  return(MetricDF)
+  
+}
+
+```
+
+
+```{r}
+
+nodebase <-1000
+
+set.seed(876)
+s <- matrix(rnorm(nodebase^2), nodebase) #%>% cor
+# s <- s +abs(min(s))+0.001
+# s[lower.tri(s)] = t(s)[lower.tri(s)]
+# diag(s) <- 0
+s <- (1-cor(s))^2   #square is used to exxagerate differences for testing small matrices
+s2<- s
+s2
+
+s3 <- Phase1SemiMetricRemoval(s)
+diag(s3)<- NA
+
+test <- Phase2TwoHopMetric(s3)
+
+
+
+sum(MetricDF!=test)
 
 s3[is.na(s3)] <- 0
 
@@ -73,26 +166,31 @@ datdat <- readRDS(list.files()[1]) %>%
         as.tibble 
       
       cormat <- datdat[,2:ncol(datdat)] %>%
-        as.matrix %>% cor
+        as.matrix %>% cor(.)
       diag(cormat) <- 0
-      #cormat[is.na(cormat)] <- 0
-      distmat <-sqrt(2*(1-cormat))
+      distmat <-1-cormat
 
       min(distmat)
       max(distmat)
       
-test <- Stage1SemiMetricRemoval(distmat)
+test <- Phase1SemiMetricRemoval(distmat)
 test[is.na(test)] <- 0
 
 gtest <- graph_from_adjacency_matrix(test, mode = "undirected", weighted = "weight", diag = FALSE) 
 
+saveRDS(gtest, file.path(SavedData, "gtestSemiMetric1.rds"))
 
 ecount(gtest)
 maxedgetest <- ncol(cormat)*(ncol(cormat)-1)/2
 ecount(gtest)/(maxedgetest)
 components(gtest)
 
-plot(gtest)
+fc <-cluster_louvain(gtest)
+
+plot(gtest2)
+
+colors <- rainbow(max(membership(fc)))
+plot(gtest,vertex.color=colors[membership(fc)], vertex.label=NA, vertex.size = 3)
 
 ```
 
@@ -126,9 +224,11 @@ dist3 <- dist2
 
 
 
-test2 <- Stage1SemiMetricRemoval(dist2)
+test2 <- Phase1SemiMetricRemoval(dist2)
 test2[is.na(test2)] <- 0
 diag(test2) <- 0
+
+orderedheat(test2, order = "both", simMat = T, mergey = 1, mergex = 1, xblocks=1, yblocks=1)
 
 gtest <- graph_from_adjacency_matrix(test2 , mode = "undirected", weighted = "weight", diag = FALSE) 
 
@@ -138,5 +238,19 @@ maxedgetest <- ncol(dist2)*(ncol(dist2)-1)/2
 ecount(gtest)/(maxedgetest)
 components(gtest)
 plot(gtest)
+```
+
+
+```{r}
+
+x <- y <- 1:10
+y <- x+100
+
+x %*% y / sqrt(x%*%x * y%*%y)
+
+cor(x,y)
+
+scale(x)
+scale(y)
 ```
 

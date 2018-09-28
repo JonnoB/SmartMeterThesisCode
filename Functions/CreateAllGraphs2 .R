@@ -29,7 +29,7 @@ CreateAllGraphs2 <- function(SourceFolder, TargetFolder,cutoff=0.7,  StartTime =
                hms(sub("^.*\\s", "", as.character(Date.Time)))<hms(EndTIme))
       
       cormat <- datdat[,2:ncol(datdat)] %>%
-        as.matrix %>% cor(., method = "spearman") #has to be spearman as the data is not normally distributed
+        as.matrix %>% cor(.) 
       diag(cormat) <- 0
       cormat[is.na(cormat)] <- 0
       graph <- createcleangraph2(cormat, cormat > cutoff)
