@@ -60,19 +60,21 @@ CreateBaseModellingData <- function(daypart, ModelBlock, StartTimei, EndTimei, c
     
   }
   
-  
+  #### This is the only bit that requires information on days to include
+  #Day nodes is not neccessary but I don't care
+
   #creates the transfer counts from day A to day B, used as the basis for creating the transition matrix.
   #doing it this wayis faster as the conversion only has to be done once.
   if(file.exists(file.path(ModelBlock, daypart , "DayTransfer.rds"))){
     DayTransfer <- readRDS(file.path(ModelBlock, daypart ,"DayTransfer.rds"))
     DayNodes <- readRDS(file.path(ModelBlock, daypart ,"DayNodes.rds"))
   }else{
-    
+
     DayTransfer <- CreateDayTransfer(NodeClust, Clustconversion, nodeclustlist)
     saveRDS(DayTransfer, file.path(ModelBlock, daypart ,"DayTransfer.rds"))
     #Total number of nodes in each cluster each day
     DayNodes <- DayTransfer %>% map(~{
-      
+
       .x %>%
         select(-Day2) %>%
         group_by(Day1) %>%
@@ -81,7 +83,7 @@ CreateBaseModellingData <- function(daypart, ModelBlock, StartTimei, EndTimei, c
                     distinct(ClustID) %>%
                     rename(Day1= ClustID),., by = "Day1") %>%
         mutate(Day1 = ifelse(is.na(Day1),0, Day1))
-      
+
     })
     names(DayNodes) <- names(nodeclustlist)[-length(nodeclustlist)]
     saveRDS(DayNodes, file.path(ModelBlock, daypart ,"DayNodes.rds"))

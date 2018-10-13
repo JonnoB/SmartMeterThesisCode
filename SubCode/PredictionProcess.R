@@ -15,7 +15,7 @@ rm(Dayindices)
   
   print(paste0("Fold ", .x, " of 10"))
   
-  TestDates <- names(DayTransfer)[Folds[[.x]]] 
+  TestDates <- names(DayTransfer)[Folds[[.x]]]
   TrainDates <- names(DayTransfer)[!(names(DayTransfer) %in% TestDates)]
   #Create transition matrix using a specific fold of the data
   

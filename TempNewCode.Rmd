@@ -251,14 +251,14 @@ TimePeriods <- TimePeriods %>% arrange(paste(Start, End, sep = "-")) %>%
 1:nrow(TimePeriods) %>% walk(~{
   
 CreateAllGraphs2(SourceFolder = daytimeseries, 
-                 TargetFolder = file.path(ModelBlock, TimePeriods2$daypart[.x], "Graphs"),
-                 cutoff = TimePeriods2$cutoff2[.x],
-                 StartTime = TimePeriods2$Start[.x],
-                 EndTIme = TimePeriods2$End[.x])
+                 TargetFolder = file.path(ModelBlock, TimePeriods$daypart[.x], "Graphs"),
+                 cutoff = TimePeriods$cutoff2[.x],
+                 StartTime = TimePeriods$Start[.x],
+                 EndTIme = TimePeriods$End[.x])
 
 })
 
-rm(TimePeriods2)
+
 
 ```
 
@@ -340,18 +340,10 @@ rm(list = "CommTimes", "graph", "bench")
 
 ```{r}
 
-TimePeriods$daypart %>% walk(~{
-  print(.x)
-  daypart <- .x
-  
-  print(daypart)
-  source(file = file.path(DropboxPath,"SmartMeterThesisCode/SubCode", "PredictionProcess.R"))
-
-  }
-)
+TransmissionTypeDF <- tibble(TransmissionType = c("all", weekdays(Sys.Date()+0:6)) )
 
 for(i in 1:nrow(TimePeriods)){
-  
+  print(i)
   daypart <- TimePeriods$daypart[i]
   StartTimei <- TimePeriods$Start[i]
   EndTimei <- TimePeriods$End[i]
@@ -359,9 +351,20 @@ for(i in 1:nrow(TimePeriods)){
   
   CreateBaseModellingData(daypart, ModelBlock, StartTimei, EndTimei, cutoffi)
   
-  source(file = file.path(DropboxPath,"SmartMeterThesisCode/SubCode", "PredictionProcess.R"))
+  1:nrow(TransmissionTypeDF) %>%  walk(~{
+    
+    CreatePredictions(DayTransfer, 
+                      ModelBlock, 
+                      daypart, 
+                      TransmissionType = TransmissionTypeDF$TransmissionType[.x], 
+                      clusterprofile, 
+                      Clustconversion, 
+                      DayNodes,
+                      TargetDays = TransmissionTypeDF$TransmissionType[.x])
+  })
+  
+}
 
-  }
 
 #The plots show that the 24 hour clusters are broad time of day clusters
 test <- melt(clusterprofile, id ="time", variable.name = "UniqueID", value.name = "kwh" ) %>%
@@ -391,36 +394,51 @@ test %>%
 
 ```{r}
 
+PredictionClasses <- expand.grid(Fold = 1:10, 
+                                  daypart = TimePeriods$daypart, 
+                                  transtype =  c("all", weekdays(Sys.Date()+0:6)) ) %>%
+  as.tibble
 
-PredictedProfiles  <- 1:10 %>% map_df(~{
-  
-  Fold <- .x
-  
-  FoldProfiles <- 1:7 %>%
+PredictedProfiles <- 1:nrow(PredictionClasses)  %>% 
   map_df(~{
-    readRDS(file.path(ModelBlock, TimePeriods$daypart[.x], 
+  
+  Fold <- PredictionClasses$Fold[.x]
+  daypartx <- PredictionClasses$daypart[.x]
+  transtypex <- PredictionClasses$transtype[.x]
+
+       path <- file.path(ModelBlock, daypartx, 
                       "PredictedProfiles", 
-                      paste0("PredProfiles_Fold",Fold,".rds"))) %>%
-      mutate(daypart = TimePeriods$daypart[.x],
-        type = case_when(
-          grepl("6", daypart) ~"6",
-          grepl("12", daypart) ~"12",
-          TRUE ~ "WholeDay"
-        ),
-        Fold = Fold)
-    })
+                      transtypex, #The transmission type
+                      paste0("PredProfiles_Fold",Fold,".rds"))
+
+            Out <- readRDS(path) %>%
+            mutate(daypart = daypartx,
+              daytype = case_when(
+                grepl("6", daypart) ~"6",
+                grepl("12", daypart) ~"12",
+                TRUE ~ "WholeDay"
+              ),
+              transtype = transtypex,
+              modeltype = case_when(
+                transtype == "all" ~ "Simple",
+                TRUE ~ "Single Day"
+              ),
+              Fold = Fold) 
+            
+            Out
 })
+
 
 Pred2 <- PredictedProfiles %>%
   mutate(isReal = ProfileType=="True Profile") %>%
-  select(-ClustID,-ProfileType,-type) %>%
-  group_by(time, date, daypart, Fold) %>%
+  select(-ClustID,-ProfileType,-daytype, -transtype) %>%
+  group_by(time, date, daypart, Fold, modeltype) %>%
   summarise_all(sum, na.rm = T) %>%
    mutate(diffperc = (kwh -TrueValues)/TrueValues,
           day = weekdays(as.Date(date))) %>%
  mutate(day = factor(day, 
                      levels =  c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")),
-        type = case_when(
+        daytype = case_when(
           grepl("6", daypart) ~"6",
           grepl("12", daypart) ~"12",
           TRUE ~ "WholeDay"
@@ -429,41 +447,49 @@ Pred2 <- PredictedProfiles %>%
 PredictedProfiles %>%
   ggplot(aes(x = time, y = kwh, group = paste(ClustID, date),  colour = ClustID))+ geom_line(alpha = 0.2) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  facet_wrap(type~.)
+  facet_grid(daytype~modeltype)
 
 PredictedProfiles %>%
   ggplot(aes(x = time, y = TrueValues, group = paste(ClustID, date),  colour = ClustID))+  geom_line(alpha = 0.2)+
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_grid(modeltype~.)
 
 Pred2 %>%
-  ggplot(aes(x = time, y = kwh-TrueValues, group = paste(type, date),  colour = type))+ geom_line(alpha = 0.2) +
+  ggplot(aes(x = time, y = kwh-TrueValues, group = paste(daytype, date),  colour = daytype))+ geom_line(alpha = 0.2) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  facet_wrap(type~.)
+  facet_grid(daytype~modeltype) 
 
-  
+Modeltypes <- expand.grid(daytype = c("6", "12", "WholeDay"),modeltype =  c("Simple", "Single Day"), Fold = 1:10)  %>%
+  as.tibble() %>%
+  mutate(daytype = as.character(daytype),
+         modeltype = as.character(modeltype))
 
-TransmissionPerf <- c("6", "12", "WholeDay") %>%
+TransmissionPerf <-1:nrow(Modeltypes) %>%
   map_df(~{
+    print(Modeltypes[.x,])
     
-    Target <- Pred2 %>%
-      filter(type == .x)
+    logfilt <- grepl(Modeltypes$Fold[.x], Pred2$Fold) & 
+      grepl(Modeltypes$modeltype[.x], Pred2$modeltype) &
+      grepl(Modeltypes$daytype[.x], Pred2$daytype) 
     
-    1:10 %>%
-      map_df(~{
-        
-        Target <- Target %>%
-          filter(Fold == .x) 
+    Target <- Pred2[logfilt,] #something wierd happened filter was really slow
         
         metrics(Target,  truth = TrueValues, estimate = kwh)%>% 
   mutate(mape =  mape(Target$kwh, Target$TrueValues)) %>%
-          mutate(Fold = .x)
+          mutate(Fold = Modeltypes$Fold[.x],
+                 daytype = Modeltypes$daytype[.x],
+                 modeltypemethod = Modeltypes$modeltype[.x])
         
-      }) %>%
-      mutate(type = .x)
-    
-  }) %>%
+     }) %>%
   mutate(ModelType = "Transmission")
   
+TransmissionPerf %>%
+  group_by(daytype, modeltypemethod, ModelType) %>%
+  summarise_all(funs(mean, median))
+
+TransmissionPerf %>%
+  ggplot(aes(x = daytype, y = mape, fill = daytype)) + geom_boxplot() +
+  facet_grid(.~modeltypemethod)
 
 
 DayRes <-unique(Pred2$date) %>% map_df(~{
@@ -719,19 +745,19 @@ LinearPerf <- c("6", "12", "WholeDay") %>%
           mutate(Fold = .x)
         
       }) %>%
-      mutate(type = .x)
+      mutate(daytype = .x)
 
 }) %>%
   mutate(ModelType = "Linear")
 
 
 
-#Shows side by side generic next day prediction for the 3 model types
+#Shows side by side generic next day prediction for the 3 model daytypes
 test <- bind_rows(TransmissionPerf, LinearPerf)
 
 #Linear model clearly outperforms the the transmission model
 test %>%
-  ggplot(aes(x=type, y = rsq, fill = ModelType))+ geom_boxplot() 
+  ggplot(aes(x=daytype, y = rsq, fill = ModelType))+ geom_boxplot() 
 
 ```
 

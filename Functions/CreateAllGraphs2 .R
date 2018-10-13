@@ -1,4 +1,4 @@
-CreateAllGraphs2 <- function(SourceFolder, TargetFolder,cutoff=0.7,  StartTime = "00:00:00", EndTIme = "24:00:00", files=NA ){
+CreateAllGraphs2 <- function(SourceFolder, TargetFolder, cutoff=0.7,  StartTime = "00:00:00", EndTIme = "24:00:00", files=NA ){
   #A function to simplify the creation of all graphs, This version avoids needing all the corellation matrices but takes longer as a result
   #SourceFolder: Folder where the day data is kept
   #TargetFolder: Folder where the graphs will be stored
@@ -9,6 +9,8 @@ CreateAllGraphs2 <- function(SourceFolder, TargetFolder,cutoff=0.7,  StartTime =
   
   #dependent packages
   #dplyr, igraph
+  
+  dir.create(TargetFolder, showWarnings = FALSE) #create ffolder if it is not there
   
   #Find all source files
   setwd(SourceFolder)

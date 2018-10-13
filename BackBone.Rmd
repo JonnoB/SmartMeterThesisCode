@@ -10,19 +10,45 @@ editor_options:
 Stage 1: Identify lines that are definately semi-metric
 Stage 2: Identify lines that are definately 2 hop metric
 Stage 3: Identify remaining lines with breadth first search
-
+#Phase 1
 ```{r}
 #stage 1 
 Phase1SemiMetricRemoval <- function(s){
+#Matrix of 1 triangle semi-metric edges
+  #s: a distance matrix
+      Smat <- col(s) 
+      
+      SemiMetric <- 1:ncol(s) %>%
+      map(~{
+       print(.x)
+        TargetRows <- .x:ncol(s)
+        LogicMat <- s[TargetRows,TargetRows, drop = F] + 
+          s[TargetRows,.x][Smat[1:length(TargetRows),1:length(TargetRows)]]  < s[TargetRows,.x]
+       
+        
+        matrix(data = c(rep(NA, .x-1),rowSums(LogicMat, na.rm = TRUE ) > 0), ncol = 1) #TRUE means semi-metric edge
+      
+      }) %>%
+      do.call(cbind,.)
+  
+      SemiMetric[upper.tri(SemiMetric)]  <- t(SemiMetric)[upper.tri(SemiMetric)]
+      
+      s[SemiMetric] <- NA #change Semi-metric values to NA. This makes the further stages easier to manage
+    
+    s
+
+}
+
+
+Phase1SemiMetricRemoval2 <- function(s){
 #Matrix of 1 triangle semi-metric edges
   #s: a distance matrix
       Smat<- col(s) 
       
       SemiMetric <- 1:ncol(s) %>%
       map(~{
-        print(.x)
-     #   TargetRows <- (.x+1):ncol(s)
-     #LogicMat <- s[TargetRows,] + s[TargetRows,.x][Smat[TargetRows,]] < (s[TargetRows,.x])
+        #print(.x)
+
      LogicMat <- s + s[,.x][Smat] < (s[,.x]) #slightly faster than using transpose it still takes ages though
  
      matrix(data = rowSums(LogicMat, na.rm = TRUE ) > 0, ncol = 1) #TRUE means semi-metric edge
@@ -37,15 +63,93 @@ Phase1SemiMetricRemoval <- function(s){
 
 }
 
+
+Phase1SemiMetricRemovalfor <- function(s){
+#Matrix of 1 triangle semi-metric edges
+  #s: a distance matrix
+      Smat <- col(s) 
+      SemiMetric <- matrix(FALSE, ncol = ncol(s), nrow = ncol(s))
+      
+      for(.x in 1:ncol(s)){
+     #   print(.x)
+        TargetRows <- .x:ncol(s)
+        LogicMat <- s[TargetRows,TargetRows, drop = F] + 
+          s[TargetRows,.x][Smat[1:length(TargetRows),1:length(TargetRows)]]  < s[TargetRows,.x]
+       
+       SemiMetric[.x,TargetRows] <- rowSums(LogicMat, na.rm = TRUE ) > 0 #TRUE means semi-metric edge
+      
+      }
+  
+      SemiMetric[lower.tri(SemiMetric)]  <- SemiMetric[upper.tri(SemiMetric)]
+      
+      s[SemiMetric] <- NA #change Semi-metric values to NA. This makes the further stages easier to manage
+    
+    s
+
+}
+
+
+txt <- 'arma::mat S = Rcpp::as< arma::mat >(s);
+const int n -> S.n_rows;
+//arma::mat Smat = n;
+vector<unsigned> Out;
+ for (int i=1; i < n; ++i) {
+ vec TargetRows = linspace<vec>(0, i, i + 1); 
+  Out[i] = arma::accu(TargetRows);
+
+ }
+return Out;'
+
+Rcpp::cppFunction(depends = "RcppArmadillo", code = '
+Rcpp::List Phase1cpp(const arma::mat &s) {
+  const int n = s.n_rows;
+  vec x(10);
+vec y = zeros<vec>(10);
+
+  for (int i=1; i < n; ++i) {
+  vec TargetRows = linspace<vec>(0, i, i + 1); 
+  Out[i] = arma::accu(TargetRows);
+
+ }
+ return Rcpp::List::create( Rcpp::Named("Out") = Out,
+Rcpp::Named("Out") = n );
+}')
+
+Phase1cpp(matrix(rnorm(25), ncol = 5))
+
+library(RcppArmadillo)
+
+Rcpp::cppFunction(depends = "RcppArmadillo", code = '
+Rcpp::List Phase1cpp(const arma::mat &X, const arma::mat &Y) {
+   const int n = X.n_rows;
+ return Rcpp::List::create( Rcpp::Named("Out") = (X<Y),
+Rcpp::Named("Out") = n );
+}')
+
+
+
+txt <- 'arma::mat Am = Rcpp::as< arma::mat >(A);
+arma::mat Cm = Rcpp::as< arma::mat >(C);
+arma::mat B = inv(trans(Am) * Cm * Am);
+arma::mat PTDF = Cm * Am * B;
+return Rcpp::List::create( Rcpp::Named("Imp") = B ,
+                           Rcpp::Named("PTDF") = PTDF ) ; '
+
+flowCalcCpp <- cxxfunction(signature(A="numeric",
+C="numeric"),
+body=txt,
+plugin="RcppArmadillo")
+
 ```
 
 
+#Phase 2
 ```{r}
 ShortestEdgeMetric <- function(s3){
   #begins phase two of finding the metric backbone
   #Takes in a matrix that has had the first round of semi-metric edges removed
   #Finds the shortest edge of each vertex and outputs a symmetric logical matrix
-  #s3 the phase 1 complete distance matrix
+  #s3: the phase 1 complete distance matrix
   
 ShortMetric <- 1:nrow(s3) %>% map_dbl(~which.min(s3[,.x])) #lowest value by column
 
@@ -65,12 +169,13 @@ MetricDF
 TwoHopMetric <- function(s3, MetricDF){
   #Performs the second part of Phase two of creating the metric backbone
   #s3 is the phase 1 matrix
-  #MetricDF if the shortest path metric matrix
+  #MetricDF if the shortest path metric matrix aka the metric edges found so far
   
-  for(n in 1:ncol(s3)){  
+  for(n in 1:ncol(s3)){  #for each node 
  
   TargetNode <- n
   
+  #find already known metric edges
   MetricVect <- which(MetricDF[,TargetNode]==T)
   
   TargetVect <- s3[,TargetNode]
@@ -122,6 +227,11 @@ Phase2TwoHopMetric <- function(s3){
 
 ```
 
+#Phase 3
+https://github.com/igraph/igraph/blob/c517ad26e537bbdf363a1f6f9cabd66040664fdd/src/structural_properties.c#L4214
+
+4214 t0 4390
+
 ```{r}
 MakeEdgList <- function(mat, VarName){
   #required as part of the phase 3 function
@@ -169,6 +279,7 @@ rm(VertexID)
 print("Perform Breadth first search across all unlabled nodes")
 
 ShortestPath <-1:nrow(Unlabled) %>% map_dbl(~{
+  print(paste(.x, "of", nrow(Unlabled)))
   distances(g, v = Unlabled$node1_ID[.x], to =Unlabled$node2_ID[.x] )
   })
 
@@ -188,15 +299,66 @@ return(melts3)
 
 ```
 
+#Saved calcs
 
 ```{r}
+SavedCalcs <- function(n){
+  (2*n+1)*(n+1)/(6*n^2)
+  
+}
+
+
+SavedCalcs(4000)
+
+```
+
+
+```{r}
+library(compiler)
+
+Phase1forcmp <- cmpfun(Phase1SemiMetricRemovalfor)
+
+
+microbenchmark(Phase1SemiMetricRemoval(s), 
+               Phase1SemiMetricRemoval2(s), 
+               Phase1SemiMetricRemovalfor(s),
+               Phase1forcmp(s), times = 10)
+
+
+microbenchmark(rowSums(LogicMat, na.rm = TRUE ) > 0, LogicMat %*% matrix(1, nrow = 1000) >0)
+
+
+(LogicMat %*% matrix(1, nrow = 1000) > 0)[,1]
+
+txt <- 'arma::mat Am = Rcpp::as< arma::mat >(A);
+arma::mat Cm = Rcpp::as< arma::mat >(C);
+arma::mat B = inv(trans(Am) * Cm * Am);
+arma::mat PTDF = Cm * Am * B;
+return Rcpp::List::create( Rcpp::Named("Imp") = B ,
+                           Rcpp::Named("PTDF") = PTDF ) ; '
+
+rowsumtxt <- "arma::mat LogicMatm = Rcpp::as< arma::mat >(LogicMat);
+int r,c;
+int sum_rows;
+for (int i=0; i<r; i++) {
+        sum_rows=0;
+        for (int j=0; j<c; j++) {
+            sum_rows += LogicMatm[i][j];
+        }
+return sum_rows"
+
+RowsumCpp <- cxxfunction(signature(LogicMat="numeric"),
+body=rowsumtxt,
+plugin="RcppArmadillo")
+
+
 
 ```
 
 
 ```{r}
 
-nodebase <-10
+nodebase <-1000
 
 set.seed(876)
 s <- matrix(rnorm(nodebase^2), nodebase) #%>% cor
@@ -211,52 +373,22 @@ rownames(s) <- make.names(1:ncol(s))
 # s2
  
 s3 <- Phase1SemiMetricRemoval(s)
+s4 <- Phase1SemiMetricRemoval2(s)
 diag(s3)<- NA
 
 s4 <- Phase2TwoHopMetric(s3)
+s5 <- Phase2(s3)
 
+sum(s5[lower.tri(s5)])
+sum(s4[lower.tri(s4)])
 test <- Phase3MetricEdges(s3, s4)
+
+microbenchmark(Phase1SemiMetricRemoval(s),Phase1SemiMetricRemoval2(s), times = 100)
 
 #diag(s4) <- NA
 s4[1:10,1:10]
 
 sum(s4, na.rm = T)#number of postively ID'd metric edges
-
-
-
-melts3 <- MakeEdgList(s3, "weight")
-melts4 <- MakeEdgList(s4, "Metric")
-
-melts3 <- melts4[melts3, on = c("node2", "rn")][!is.na(weight)] %>%
-  as.tibble %>% rename(node1 = rn) %>%
-  mutate(edge_name = paste0(node1,"_", node2),
-         Metric = ifelse(is.na(Metric), FALSE, TRUE))
-
-g <- graph_from_data_frame(melts3, directed = FALSE)
-
-VertexID<- tibble(node = get.vertex.attribute(g, "name"), ID = 1:vcount(g))
-
-get.edge.attribute(g, "edge_name")
-
-Unlabled <- melts3 %>%
-  filter(Metric ==FALSE) %>%
-  left_join(., VertexID, by = c("node1" = "node")) %>%
-  left_join(., VertexID, by = c("node2" = "node")) %>%
-  rename(node1_ID = ID.x, node2_ID = ID.y)
-
-print("Perform Breadth first search across all unlabled nodes")
-
-ShortestPath <-1:nrow(Unlabled) %>% map_dbl(~{
-  distances(g, v = Unlabled$node1_ID[.x], to =Unlabled$node2_ID[.x] )
-  })
-
-Unlabled <- Unlabled %>%
-  mutate(TrueShortest = ShortestPath,
-         Metric = ifelse(all.equal(weight,TrueShortest), TRUE, FALSE))
-
-print("Remove final Semi-metric edges")
-
-
 
 ecount(g)
 maxedge <- nodebase*(nodebase-1)/2
@@ -271,7 +403,7 @@ plot(g,vertex.color=colors[membership(clus)], vertex.label=NA, vertex.size = 3)
 ```
 
 
-try with real data
+#Try with real data
 ```{r}
  
 setwd("/home/jonno/Dropbox/MScThesis/DayTimeSeries")
@@ -282,31 +414,64 @@ datdat <- readRDS(list.files()[1]) %>%
       cormat <- datdat[,2:ncol(datdat)] %>%
         as.matrix %>% cor(.)
       distmat <-1-cormat
+      distmat2 <- sqrt(2*(1-cormat))
+      distmat3 <- distmat2*(cormat>0.7)
       diag(cormat) <- NA
       
       min(distmat)
       max(distmat)
       
-test <- Phase1SemiMetricRemoval(distmat)
-test[is.na(test)] <- 0
+Case1 <- Phase1SemiMetricRemoval(distmat)
+Case2 <- Phase1SemiMetricRemoval(distmat2)
+test1 <- Phase2TwoHopMetric(Case1)
+test2 <- Phase2TwoHopMetric(Case2)
+#test3 <- Phase3MetricEdges(test, test2)
 
-gtest <- graph_from_adjacency_matrix(test, mode = "undirected", weighted = "weight", diag = FALSE) 
+saveRDS(Case1, file.path(SavedData, "Case1.rds"))
+saveRDS(Case2, file.path(SavedData, "Case2.rds"))
 
+Case1[is.na(Case1)] <- 0
+Case2[is.na(Case2)] <- 0
+
+ 
+gCase1 <- graph_from_adjacency_matrix(Case1, mode = "undirected", weighted = "weight", diag = FALSE) 
+gCase2 <- graph_from_adjacency_matrix(Case2, mode = "undirected", weighted = "weight", diag = FALSE) 
+gtest2 <- graph_from_adjacency_matrix(distmat2, mode = "undirected", weighted = "weight", diag = FALSE) 
 
 saveRDS(gtest, file.path(SavedData, "gtestSemiMetric1.rds"))
 
-test<- readRDS(file.path(SavedData, "gtestSemiMetric1.rds"))
+#gtest<- readRDS(file.path(SavedData, "gtestSemiMetric1.rds"))
 
-test2 <- as_adjacency_matrix(test, attr = "weight", sparse =0)
-
-test <- test2 %>% as.data.table()  %>% melt()
-
-ecount(gtest)
 maxedgetest <- ncol(cormat)*(ncol(cormat)-1)/2
-ecount(gtest)/(maxedgetest)
-components(gtest)
 
-fc <-cluster_louvain(gtest)
+ecount(gCase1)
+ecount(gCase1)/(maxedgetest)
+components(gCase1)
+
+ecount(gCase2)
+ecount(gCase2)/(maxedgetest)
+components(gCase2)
+
+
+
+ecount(gtest2)
+maxedgetest2 <- ncol(cormat)*(ncol(cormat)-1)/2
+ecount(gtest2)/(maxedgetest2)
+components(gtest2)
+
+fc <-cluster_louvain(gCase1)
+fc2 <-cluster_louvain(gtest2)
+
+length(membership(fc))
+length(membership(fc2))
+
+test <- tibble(names = fc$names, c1 = membership(fc), c2 = membership(fc2)) %>%
+  group_by(c2) %>%
+  mutate(countC2 = n()) %>%
+  ungroup %>%
+  mutate(c22 = ifelse(countC2>20, c2, 0))
+
+table(test$c1, test$c22)
 
 plot(gtest2)
 
@@ -410,6 +575,185 @@ RemoveTri(s2)
 
 l <- lineprof(RemoveTri(s))
 shine(l)
- 
+
+
+```
+
+
+##test symmetric creation
+```{r}
+library(Rcpp)
+
+cppFunction('NumericMatrix Mat2Sym(NumericMatrix A, bool up2lo, int bf) {
+
+  IntegerVector dim = A.attr("dim");
+  size_t n = (size_t)dim[0], m = (size_t)dim[1];
+  if (n != m) stop("A is not a square matrix!");
+
+  /* use pointers */
+  size_t j, i, jj, ni, nj;
+  double *A_jj, *A_ij, *A_ji, *col, *row, *end;
+
+  /* cache blocking factor */
+  size_t b = (size_t)bf;
+
+  /* copy lower triangular to upper triangular; cache blocking applied */
+  for (j = 0; j < n; j += b) {
+    nj = n - j; if (nj > b) nj = b;
+    /* diagonal block has size nj x nj */
+    A_jj = &A(j, j);
+    for (jj = nj - 1; jj > 0; jj--, A_jj += n + 1) {
+      /* copy a column segment to a row segment (or vise versa) */
+      col = A_jj + 1; row = A_jj + n;
+      for (end = col + jj; col < end; col++, row += n) {
+        if (up2lo) *col = *row; else *row = *col;
+        }
+      }
+    /* off-diagonal blocks */
+    for (i = j + nj; i < n; i += b) {
+      ni = n - i; if (ni > b) ni = b;
+      /* off-diagonal block has size ni x nj */
+      A_ij = &A(i, j); A_ji = &A(j, i);
+      for (jj = 0; jj < nj; jj++) {
+        /* copy a column segment to a row segment (or vise versa) */
+        col = A_ij + jj * n; row = A_ji + jj;
+        for (end = col + ni; col < end; col++, row += n) {
+          if (up2lo) *col = *row; else *row = *col;
+          }
+        }
+      }
+    }
+
+  return A;
+  }')
+
+s <- CreateData(1000, 876)
+
+     Smat <- col(s) 
+      
+      SemiMetric <- 1:ncol(s) %>%
+      map(~{
+        print(.x)
+        TargetRows <- .x:ncol(s)
+        LogicMat <- s[TargetRows,TargetRows, drop = F] + s[TargetRows,.x][Smat[1:length(TargetRows),1:length(TargetRows)]]  < s[TargetRows,.x]
+       
+        
+        matrix(data = c(rep(FALSE, .x-1),rowSums(LogicMat, na.rm = TRUE ) > 0), ncol = 1) #TRUE means semi-metric edge
+      
+      }) %>%
+      do.call(cbind,.)
+      
+A <- SemiMetric      
+
+test <- A +t(A)
+
+
+D <- Mat2Sym(A + 0, up2lo = TRUE, 128)
+
+microbenchmark(A+t(A), Mat2Sym(A, up2lo = FALSE, 128))
+
+```
+
+
+#compile function
+
+```{r}
+library(compiler)
+
+s <- CreateData(100, 876)
+
+MatWalk <- function(s){      
+  Smat <- col(s) 
+      
+      SemiMetric <- 1:ncol(s) %>%
+      map(~{
+       # print(.x)
+        TargetRows <- .x:ncol(s)
+        LogicMat <- s[TargetRows,TargetRows, drop = F] + s[TargetRows,.x][Smat[1:length(TargetRows),1:length(TargetRows)]]  < s[TargetRows,.x]
+       
+        
+        matrix(data = c(rep(NA, .x-1),rowSums(LogicMat, na.rm = TRUE ) > 0), ncol = 1) #TRUE means semi-metric edge
+      
+      }) %>%
+      do.call(cbind,.)
+}
+
+MatWalkCmp <- cmpfun(MatWalk)
+
+MatFor <- MatWalk <- function(s){      
+  Smat <- col(s) 
+      
+      SemiMetric <- list()
+      for(i in 1:ncol(s)){
+       # print(.x)
+        TargetRows <- i:ncol(s)
+        LogicMat <- s[TargetRows,TargetRows, drop = F] + s[TargetRows,i][Smat[1:length(TargetRows),1:length(TargetRows)]] < s[TargetRows,i]
+       
+        
+       SemiMetric[[i]] <-  matrix(data = c(rep(NA, i-1),rowSums(LogicMat, na.rm = TRUE ) > 0), ncol = 1) #TRUE means semi-metric edge
+      
+      }
+        
+      
+     # SemiMetric <- do.call(cbind,SemiMetric)
+}
+
+
+MatForCmp <- cmpfun(MatFor)
+
+LogicOut <- function(s1,s2,s3){
+  (s1 + s2) < s3 
+}
+
+LogicOutCmp <- cmpfun(LogicOut)
+
+MatOp <- MatWalk <- function(s){      
+  Smat <- col(s) 
+      
+      SemiMetric <- list()
+      for(i in 1:ncol(s)){
+       # print(.x)
+        TargetRows <- i:ncol(s)
+        s1 <- s[TargetRows,TargetRows, drop = F]
+        s2 <- s[TargetRows,i][Smat[1:length(TargetRows),1:length(TargetRows)]]
+        s3 <- s[TargetRows,i]
+        LogicMat <- (s1 + s2) < s3 
+       
+        
+       SemiMetric[[i]] <-  matrix(data = c(rep(NA, i-1),rowSums(LogicMat, na.rm = TRUE ) > 0), ncol = 1) #TRUE means semi-metric edge
+      
+      }
+        
+      
+     # SemiMetric <- do.call(cbind,SemiMetric)
+}
+
+microbenchmark(MatWalk(s), MatWalkCmp(s), MatFor(s), MatForCmp(s))
+
+
+microbenchmark(LogicOut(s1,s2,s3), LogicOutCmp(s1,s2,s3))
+```
+
+
+
+```{r}
+df <- seq(-1,1,0.01) %>%
+  tibble(p = .) %>%
+  mutate(d1 = (1-p)/2,
+         d2 = 1-(p)^2,
+         d3 =  sqrt(d1^2+d2^2),
+         d32 = d3^2)
+
+test <- df %>% filter(d3>1)
+
+df %>%
+ggplot(aes(x = p, y = d3)) + geom_point()
+
+df %>%
+ggplot(aes(x = p, y = d2)) + geom_point()
+
+df %>%
+ggplot(aes(x = p, y = d1)) + geom_point()
+
 ```
 
