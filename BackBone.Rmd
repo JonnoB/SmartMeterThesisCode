@@ -145,85 +145,67 @@ plugin="RcppArmadillo")
 
 #Phase 2
 ```{r}
-ShortestEdgeMetric <- function(s3){
-  #begins phase two of finding the metric backbone
-  #Takes in a matrix that has had the first round of semi-metric edges removed
-  #Finds the shortest edge of each vertex and outputs a symmetric logical matrix
-  #s3: the phase 1 complete distance matrix
+
+Phase2 <- function(s3){
+  #This function postively identifies metric edges. It is the second phase of finding the metric backbone.
+  #s3 the weighted adjacncy matrix, this should already have had triangles removed by phase 1 one the metric back bone
   
-ShortMetric <- 1:nrow(s3) %>% map_dbl(~which.min(s3[,.x])) #lowest value by column
-
-MetricDF <-s3 #Create matrix of correct dimensions
-MetricDF[] <- FALSE #Initially none of the edges are metric
-
-Positions <- ShortMetric+(1:nrow(MetricDF)-1)*ncol(MetricDF) #find the shortest edge of each vertex
-
-MetricDF[Positions] <- TRUE #The shortest edges are metric
-
-MetricDF <- (MetricDF + t(MetricDF))>0 #the matrix is symmetric
-
-MetricDF
-}
-
-
-TwoHopMetric <- function(s3, MetricDF){
-  #Performs the second part of Phase two of creating the metric backbone
-  #s3 is the phase 1 matrix
-  #MetricDF if the shortest path metric matrix aka the metric edges found so far
+  #Create a logical matrix, where TRUE means the edge is metric
+  MetricDF <- matrix(FALSE, ncol = ncol(s3), nrow = nrow(s3))
   
-  for(n in 1:ncol(s3)){  #for each node 
- 
-  TargetNode <- n
-  
-  #find already known metric edges
-  MetricVect <- which(MetricDF[,TargetNode]==T)
-  
-  TargetVect <- s3[,TargetNode]
-  
-  Min_to_beat <- 1:length(MetricVect) %>%
-    map_dbl(~{
-      MetricLength <- TargetVect[MetricVect[.x]] #metric length from target row.
-  
-      min((s3[, MetricVect[.x]]+ MetricLength)[-TargetNode], na.rm = TRUE) #finds the smallest length in the coressponding 
-      ##node to target excluding the target node itself, aka no self-loops.    
+    for(n in 1:ncol(s3)){  #for each node in the graph
+  print(n)    
+      SourceNode <- n
       
-    }) %>% min # The map outputs the shortest two hop of each metric edge, the min then finds the smallest of those.
-  
-  
-  Edges2Check <- rank(TargetVect, na.last = "keep")[!MetricDF[,TargetNode]] #vector of edges to test excluding metric-edges
-  
-  OrderedEdgeDistance <- TargetVect[!MetricDF[,TargetNode]][order(TargetVect[Edges2Check], na.last = NA, decreasing = T)]
-  
-  #this while loop goes through each element and checks whether it is shorter then the minimum distance
-  #The loop breaks when either condition is not met
-  while(OrderedEdgeDistance[n] < Min_to_beat & n <= length(OrderedEdgeDistance)){ 
-    
-    #print(n);print(Min_to_beat)
-    Min_to_beat <- OrderedEdgeDistance[n]
-    
-    #Add in the metric edges for column and row
-    MetricDF[which(TargetVect == Min_to_beat), TargetNode] <- TRUE
-    MetricDF[TargetNode, which(TargetVect == Min_to_beat)] <- TRUE
-  
+      #Finds shortest edge of that node
+      ShortestEdgeID <- which.min(s3[,SourceNode])
+      #Makes shortest edge metric in the matrix
+      MetricDF[ShortestEdgeID,SourceNode]<-MetricDF[SourceNode,ShortestEdgeID] <- TRUE
+      #Identifies all the metric edges attached to this node
+      MetricVect <- which(MetricDF[,SourceNode]==T)
+     
+      #find shortest two hop distance using each of the metric edges
+      Min_to_beat <- MetricVect %>%
+        map_dbl(~Shortest2Hop(s3, SourceNode, .x)) %>% min
+      
+      SVESN <- s3[!MetricDF[,c(SourceNode)], SourceNode] #Source Vector Excluding Source Node
+      #Sort edges by ascending distance
+      OrderedEdgeDistance <- sort(SVESN) 
+      
+      p <- 1
+      while(OrderedEdgeDistance[p] < Min_to_beat & p <= length(OrderedEdgeDistance)){ 
+        #Find Index of new metric edge
+        NewMetricEdge <- which(colnames(s3)==names(OrderedEdgeDistance[p]))
+        #Update Min_to_beat if necessary
+        #Min_to_beat <- c(Shortest2Hop(s3, SourceNode, NewMetricEdge), Min_to_beat) %>% min 
+        print(paste("p is ", p, "Min to beat is",Min_to_beat))
+        #Create new metric entry
+        MetricDF[NewMetricEdge, SourceNode] <- MetricDF[SourceNode, NewMetricEdge] <-TRUE
+        p <- p+1
+
     } 
+  #return the Metric edge Logical matrix    
+
+    }
   
-  }
-  
-  return(MetricDF)
-  
+    return(MetricDF)
 }
 
-Phase2TwoHopMetric <- function(s3){
-  #Performs phase 2 of the metric backbone process.
-  #Takes the output matrix of phase 1
-  #s3: out put matrix of phase 1
-  diag(s3) <- NA
-  MetricDF <- ShortestEdgeMetric(s3) %>%
-    TwoHopMetric(s3, .)
+
+Shortest2Hop <- function(AdjacencyMat, SourceNode, TargetNode){
+  #This function finds the shortest two hop distance starting from a named node and going through a second node.
+  #The weighted adjacency matrix of the graph
+  #SourceNode start point of the path search
+  #TargetNode: A node 1 hop from the source node it is the middle of the path
+      
+      MetricLength <- AdjacencyMat[SourceNode, TargetNode] #Length of metric edge
   
-  return(MetricDF)
-  
-}
+      #The minimum length edge in the node at the other end of the metric edge, this excludes the metric edge itself
+      MinLength <-min(s3[, TargetNode][-SourceNode], na.rm = TRUE) 
+      
+      #Return the shortest two hop distance from the Source Node via Node at other end of metric edge
+      MinLength + MetricLength 
+      }
 
 ```
 
